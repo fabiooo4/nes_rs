@@ -1,23 +1,11 @@
+mod opcodes;
 use core::panic;
+use opcodes::{AddressingMode, Code};
 
 pub struct CPU {
     register_a: u8,
     register_x: u8,
     register_y: u8,
-    /// ```text
-    /// 7  bit  0
-    /// ---- ----
-    /// NV1B DIZC
-    /// |||| ||||
-    /// |||| |||+- Carry
-    /// |||| ||+-- Zero
-    /// |||| |+--- Interrupt Disable
-    /// |||| +---- Decimal
-    /// |||+------ (No CPU effect; cause of status change)
-    /// ||+------- (No CPU effect; always pushed as 1)
-    /// |+-------- Overflow
-    /// +--------- Negative
-    /// ```
     status: Status,
     program_counter: u16,
     memory: [u8; 0xFFFF],
@@ -84,39 +72,21 @@ impl CPU {
 
     pub fn run(&mut self) {
         loop {
-            let opcode = self.mem_read(self.program_counter);
+            let code = self.mem_read(self.program_counter);
+            let opcode = opcodes::CPU_OPCODES
+                .get(&code)
+                .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
+
             self.program_counter += 1;
 
-            match opcode {
-                // LDA
-                0xA9 => self.lda(AddressingMode::Immediate),
-                // TAX
-                0xAA => self.tax(),
-                // INX
-                0xE8 => self.inx(),
-                // BRK
-                0x00 => return,
-                _ => panic!("Invalid opcode"),
+            match opcode.code {
+                Code::LDA => self.lda(&opcode.mode),
+                Code::TAX => self.tax(),
+                Code::INX => self.inx(),
+                Code::BRK => return,
+                _ => {}
             }
         }
-    }
-
-    fn lda(&mut self, mode: AddressingMode) {
-        let addr = self.get_operand_address(mode);
-        let value = self.mem_read(addr);
-
-        self.register_a = value;
-        self.update_zero_and_negative_flags(self.register_a);
-    }
-
-    fn tax(&mut self) {
-        self.register_x = self.register_a;
-        self.update_zero_and_negative_flags(self.register_x);
-    }
-
-    fn inx(&mut self) {
-        self.register_x = self.register_x.wrapping_add(1);
-        self.update_zero_and_negative_flags(self.register_x);
     }
 
     fn update_zero_and_negative_flags(&mut self, result: u8) {
@@ -124,56 +94,28 @@ impl CPU {
         self.status.negative = result & 0b10000000 == 0b10000000;
     }
 
-    fn get_operand_address(&mut self, mode: AddressingMode) -> u16 {
-        match mode {
-            AddressingMode::Immediate => {
-                let pc = self.program_counter;
-                self.program_counter += 1;
-                pc
-            }
-            AddressingMode::ZeroPage => {
-                let res = self.mem_read(self.program_counter) as u16;
-                self.program_counter += 1;
-                res
-            }
+    fn get_operand_address(&mut self, mode: &AddressingMode) -> u16 {
+        let addr = match mode {
+            AddressingMode::Immediate => self.program_counter,
+            AddressingMode::ZeroPage => self.mem_read(self.program_counter) as u16,
 
-            AddressingMode::ZeroPage_X => {
-                let res = self
-                    .mem_read(self.program_counter)
-                    .wrapping_add(self.register_x) as u16;
-                self.program_counter += 1;
-                res
-            }
+            AddressingMode::ZeroPage_X => self
+                .mem_read(self.program_counter)
+                .wrapping_add(self.register_x) as u16,
 
-            AddressingMode::ZeroPage_Y => {
-                let res = self
-                    .mem_read(self.program_counter)
-                    .wrapping_add(self.register_y) as u16;
-                self.program_counter += 1;
-                res
-            }
+            AddressingMode::ZeroPage_Y => self
+                .mem_read(self.program_counter)
+                .wrapping_add(self.register_y) as u16,
 
-            AddressingMode::Absolute => {
-                let res = self.mem_read_16(self.program_counter);
-                self.program_counter += 2;
-                res
-            }
+            AddressingMode::Absolute => self.mem_read_16(self.program_counter),
 
-            AddressingMode::Absolute_X => {
-                let res = self
-                    .mem_read_16(self.program_counter)
-                    .wrapping_add(self.register_x as u16);
-                self.program_counter += 2;
-                res
-            }
+            AddressingMode::Absolute_X => self
+                .mem_read_16(self.program_counter)
+                .wrapping_add(self.register_x as u16),
 
-            AddressingMode::Absolute_Y => {
-                let res = self
-                    .mem_read_16(self.program_counter)
-                    .wrapping_add(self.register_y as u16);
-                self.program_counter += 2;
-                res
-            }
+            AddressingMode::Absolute_Y => self
+                .mem_read_16(self.program_counter)
+                .wrapping_add(self.register_y as u16),
 
             AddressingMode::Indirect_X => {
                 let base = self
@@ -200,24 +142,45 @@ impl CPU {
             }
 
             AddressingMode::NoneAddressing => panic!("Mode {:?} is not supported", mode),
+        };
+
+        // Update program counter based on parameter length
+        match mode {
+            AddressingMode::Immediate => self.program_counter += 1,
+            AddressingMode::ZeroPage => self.program_counter += 1,
+            AddressingMode::ZeroPage_X => self.program_counter += 1,
+            AddressingMode::ZeroPage_Y => self.program_counter += 1,
+            AddressingMode::Absolute => self.program_counter += 2,
+            AddressingMode::Absolute_X => self.program_counter += 2,
+            AddressingMode::Absolute_Y => self.program_counter += 2,
+            AddressingMode::Indirect_X => self.program_counter += 2,
+            AddressingMode::Indirect_Y => self.program_counter += 2,
+            AddressingMode::NoneAddressing => {}
         }
+
+        addr
+    }
+}
+
+/// Opcodes implementation
+impl CPU {
+    fn lda(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        self.register_a = value;
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
-    /* fn update_zero_and_negative_flags(&mut self, result: u8) {
-        // Zero flag
-        if result == 0 {
-            self.status |= 0b00000010;
-        } else {
-            self.status &= 0b11111101;
-        }
+    fn tax(&mut self) {
+        self.register_x = self.register_a;
+        self.update_zero_and_negative_flags(self.register_x);
+    }
 
-        // Negative flag
-        if result & 0b10000000 == 0b10000000 {
-            self.status |= 0b10000000;
-        } else {
-            self.status &= 0b01111111;
-        }
-    } */
+    fn inx(&mut self) {
+        self.register_x = self.register_x.wrapping_add(1);
+        self.update_zero_and_negative_flags(self.register_x);
+    }
 }
 
 impl Default for CPU {
@@ -262,21 +225,6 @@ impl Status {
             b: false,
         }
     }
-}
-
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-enum AddressingMode {
-    Immediate,
-    ZeroPage,
-    ZeroPage_X,
-    ZeroPage_Y,
-    Absolute,
-    Absolute_X,
-    Absolute_Y,
-    Indirect_X,
-    Indirect_Y,
-    NoneAddressing,
 }
 
 #[cfg(test)]
