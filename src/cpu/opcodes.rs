@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 lazy_static! {
     pub static ref CPU_OPCODES: HashMap<u8, Opcode> = HashMap::from([
-        (0x00, Opcode::new(Code::BRK, AddressingMode::NoneAddressing),),
-        (0xaa, Opcode::new(Code::TAX, AddressingMode::NoneAddressing),),
-        (0xe8, Opcode::new(Code::INX, AddressingMode::NoneAddressing),),
+        (0x00, Opcode::new(Code::BRK, AddressingMode::Implied),),
+        (0xaa, Opcode::new(Code::TAX, AddressingMode::Implied),),
+        (0xe8, Opcode::new(Code::INX, AddressingMode::Implied),),
         (0xa9, Opcode::new(Code::LDA, AddressingMode::Immediate)),
     ]);
 }
@@ -33,7 +33,7 @@ pub enum AddressingMode {
     Absolute_Y,
     Indirect_X,
     Indirect_Y,
-    NoneAddressing,
+    Implied,
 }
 
 pub enum Code {
