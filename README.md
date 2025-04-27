@@ -1,0 +1,22 @@
+
+----
+
+This is a simple NES emulator written in Rust. It is a work in progress and is not
+yet fully functional. The goal of this project is to learn about emulation and the
+NES architecture.
+
+## Features
+
+- [x] CPU emulation
+- [ ] BUS emulation
+- [ ] ROM loading
+- [ ] PPU emulation
+- [ ] Input handling
+- [ ] APU emulation
+
+## References
+- [Easy 6502](https://skilldrick.github.io/easy6502/) - 6502 Assembly guide
+- [The NES Dev Instruction Reference](https://www.nesdev.org/obelisk-6502-guide/reference.html#AND)
+- [6502 Instruction Reference](http://www.6502.org/tutorials/6502opcodes.html)
+- [Obelisk 6502 Guide](https://www.nesdev.org/obelisk-6502-guide/) - General 6502 guide
+- [The NES Dev Wiki](https://www.nesdev.org/wiki/Nesdev_Wiki)
