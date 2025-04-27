@@ -94,7 +94,7 @@ impl CPU {
             self.program_counter += 1;
 
             match opcode.code {
-                Code::ADC => todo!(),
+                Code::ADC => self.adc(&opcode.mode),
                 Code::AND => todo!(),
                 Code::ASL => todo!(),
                 Code::BCC => todo!(),
@@ -124,8 +124,8 @@ impl CPU {
                 Code::JMP => todo!(),
                 Code::JSR => todo!(),
                 Code::LDA => self.lda(&opcode.mode),
-                Code::LDX => todo!(),
-                Code::LDY => todo!(),
+                Code::LDX => self.ldx(&opcode.mode),
+                Code::LDY => self.ldy(&opcode.mode),
                 Code::LSR => todo!(),
                 Code::NOP => todo!(),
                 Code::ORA => todo!(),
@@ -152,6 +152,11 @@ impl CPU {
                 Code::TYA => todo!(),
             }
         }
+    }
+
+    fn set_register_a(&mut self, value: u8) {
+        self.register_a = value;
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     /// Updates the zero and negative flags based on the result of an operation
@@ -194,7 +199,7 @@ impl CPU {
                     .mem_read(self.program_counter)
                     .wrapping_add(self.register_x);
                 let low = self.mem_read(base as u16) as u16;
-                let high = self.mem_read(base as u16 + 1) as u16;
+                let high = self.mem_read(base.wrapping_add(1) as u16) as u16;
 
                 self.program_counter += 2;
 
@@ -202,15 +207,15 @@ impl CPU {
             }
 
             AddressingMode::Indirect_Y => {
-                let base = self
-                    .mem_read(self.program_counter)
-                    .wrapping_add(self.register_y);
+                let base = self.mem_read(self.program_counter);
                 let low = self.mem_read(base as u16) as u16;
                 let high = self.mem_read(base as u16 + 1) as u16;
 
+                let deref_base = high << 8 | low;
+
                 self.program_counter += 2;
 
-                high << 8 | low
+                deref_base.wrapping_add(self.register_y as u16)
             }
 
             AddressingMode::Implied => panic!("{:?} doesn't expect any parameter", mode),
@@ -244,20 +249,57 @@ impl CPU {
     /// ## Addressing modes
     /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
     /// |------------------|--------|-------|----------------------------|
-    /// | Immediate        | $A9    | 2     | 2                          |
-    /// | Zero Page        | $A5    | 2     | 3                          |
-    /// | Zero Page, X     | $B5    | 2     | 4                          |
-    /// | Absolute         | $AD    | 3     | 4                          |
-    /// | Absolute, X      | $BD    | 3     | 4 (+1 if page crossed)     |
-    /// | Absolute, Y      | $B9    | 3     | 4 (+1 if page crossed)     |
-    /// | Indirect, X      | $A1    | 2     | 6                          |
-    /// | Indirect, Y      | $B1    | 2     | 5 (+1 if page crossed)     |
+    /// | Immediate        | A9     | 2     | 2                          |
+    /// | Zero Page        | A5     | 2     | 3                          |
+    /// | Zero Page, X     | B5     | 2     | 4                          |
+    /// | Absolute         | AD     | 3     | 4                          |
+    /// | Absolute, X      | BD     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, Y      | B9     | 3     | 4 (+1 if page crossed)     |
+    /// | (Indirect, X)    | A1     | 2     | 6                          |
+    /// | (Indirect), Y    | B1     | 2     | 5 (+1 if page crossed)     |
     fn lda(&mut self, mode: &AddressingMode) {
         let param_addr = self.get_parameters_address(mode);
         let value = self.mem_read(param_addr);
 
-        self.register_a = value;
-        self.update_zero_and_negative_flags(self.register_a);
+        self.set_register_a(value);
+    }
+
+    /// Loads a byte of memory into the X register setting the zero and negative
+    /// flags as appropriate
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Immediate        | A2     | 2     | 2                          |
+    /// | Zero Page        | A6     | 2     | 3                          |
+    /// | Zero Page, X     | B6     | 2     | 4                          |
+    /// | Absolute         | AE     | 3     | 4                          |
+    /// | Absolute, Y      | BE     | 3     | 4 (+1 if page crossed)     |
+    fn ldx(&mut self, mode: &AddressingMode) {
+        let param_addr = self.get_parameters_address(mode);
+        let value = self.mem_read(param_addr);
+
+        self.register_x = value;
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    /// Loads a byte of memory into the Y register setting the zero and negative
+    /// flags as appropriate
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Immediate        | A0     | 2     | 2                          |
+    /// | Zero Page        | A4     | 2     | 3                          |
+    /// | Zero Page, X     | B4     | 2     | 4                          |
+    /// | Absolute         | AC     | 3     | 4                          |
+    /// | Absolute, X      | BC     | 3     | 4 (+1 if page crossed)     |
+    fn ldy(&mut self, mode: &AddressingMode) {
+        let param_addr = self.get_parameters_address(mode);
+        let value = self.mem_read(param_addr);
+
+        self.register_y = value;
+        self.update_zero_and_negative_flags(self.register_y);
     }
 
     /// Copies the current contents of the accumulator into the X register and
@@ -266,7 +308,7 @@ impl CPU {
     /// ## Addressing modes
     /// | Addressing Mode  | Opcode | Bytes | Cycles |
     /// |------------------|--------|-------|--------|
-    /// | Implied          | $AA    | 1     | 2      |
+    /// | Implied          | AA     | 1     | 2      |
     fn tax(&mut self) {
         self.register_x = self.register_a;
         self.update_zero_and_negative_flags(self.register_x);
@@ -277,10 +319,39 @@ impl CPU {
     /// ## Addressing modes
     /// | Addressing Mode  | Opcode | Bytes | Cycles |
     /// |------------------|--------|-------|--------|
-    /// | Implied          | $E8    | 1     | 2      |
+    /// | Implied          | E8     | 1     | 2      |
     fn inx(&mut self) {
         self.register_x = self.register_x.wrapping_add(1);
         self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    /// This instruction adds the contents of a memory location to the
+    /// accumulator together with the carry bit. If overflow occurs the
+    /// carry bit is set, this enables multiple byte addition to be performed
+    ///
+    /// The decimal mode is ignored
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Immediate        | 69     | 2     | 2                          |
+    /// | Zero Page        | 65     | 2     | 3                          |
+    /// | Zero Page, X     | 75     | 2     | 4                          |
+    /// | Absolute         | 6D     | 3     | 4                          |
+    /// | Absolute, X      | 7D     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, Y      | 79     | 3     | 4 (+1 if page crossed)     |
+    /// | (Indirect, X)    | 61     | 2     | 6                          |
+    /// | (Indirect), Y    | 71     | 2     | 5 (+1 if page crossed)     |
+    fn adc(&mut self, mode: &AddressingMode) {
+        let param_addr = self.get_parameters_address(mode);
+        let value = self.mem_read(param_addr);
+
+        let sum = self.register_a as u16 + value as u16 + self.status.carry as u16;
+        let result = sum as u8;
+
+        self.status.carry = sum > 0xff;
+        self.status.overflow = (value ^ result) & (result ^ self.register_a) & 0b10000000 != 0;
+        self.set_register_a(result);
     }
 }
 
@@ -363,69 +434,19 @@ impl Status {
 mod test {
     use super::*;
 
-    // LDA test --------------------------------------
+    // Assembler test --------------------------------------------------------
     #[test]
-    fn test_0xa9_lda_immediate_load_data() {
-        let mut cpu = CPU::new();
-        cpu.load_and_run(&[0xa9, 0x05, 0x00]);
-        assert_eq!(cpu.register_a, 0x05);
-        assert!(!cpu.status.zero);
-        assert!(!cpu.status.negative);
+    fn test_assembler() {
+        let program = assemble6502!(
+            lda #0x2
+            tax
+            lda 0x33,x
+            brk
+        );
+
+        assert_eq!(&program, &[0xa9, 0x02, 0xaa, 0xb5, 0x33, 0x00]);
     }
-
-    #[test]
-    fn test_0xa9_lda_zero_flag() {
-        let mut cpu = CPU::new();
-        cpu.load_and_run(&[0xa9, 0x00, 0x00]);
-        assert!(cpu.status.zero);
-    }
-    // LDA test --------------------------------------
-
-    // TAX test --------------------------------------
-    #[test]
-    fn test_0xaa_tax() {
-        let mut cpu = CPU::new();
-        cpu.load_and_run(&[0xa9, 0x11, 0xaa, 0x00]);
-        assert_eq!(cpu.register_a, 0x11);
-        assert_eq!(cpu.register_x, 0x11);
-        assert!(!cpu.status.zero);
-        assert!(!cpu.status.negative);
-    }
-
-    #[test]
-    fn test_0xaa_tax_zero_flag() {
-        let mut cpu = CPU::new();
-        cpu.load_and_run(&[0xa9, 0x00, 0xaa, 0x00]);
-        assert!(cpu.status.zero);
-    }
-    // TAX test --------------------------------------
-
-    // INX test --------------------------------------
-    #[test]
-    fn test_0xe8_inx() {
-        let mut cpu = CPU::new();
-        cpu.load_and_run(&[0xa9, 0x04, 0xaa, 0xe8, 0x00]);
-
-        assert_eq!(cpu.register_x, 5)
-    }
-    #[test]
-    fn test_0xe8_inx_overflow() {
-        let mut cpu = CPU::new();
-        cpu.load_and_run(&[0xa9, 0xff, 0xaa, 0xe8, 0xe8, 0x00]);
-
-        assert_eq!(cpu.register_x, 1)
-    }
-    // INX test --------------------------------------
-
-    // Basic program test -------------------------------
-    #[test]
-    fn test_5_ops_working_together() {
-        let mut cpu = CPU::new();
-        cpu.load_and_run(&[0xa9, 0xc0, 0xaa, 0xe8, 0x00]);
-
-        assert_eq!(cpu.register_x, 0xc1)
-    }
-    // Basic program test -------------------------------
+    // Assembler test --------------------------------------------------------
 
     // Memory read/write tests ----------------------
     #[test]
@@ -458,4 +479,380 @@ mod test {
         assert_eq!(cpu.mem_read_16(0x1234), 0x0420);
     }
     // Memory read/write tests ----------------------
+
+    // LDA test --------------------------------------
+    #[test]
+    fn test_0xa9_lda_immediate() {
+        let program = assemble6502!(
+            lda #0x5
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x05);
+        assert!(!cpu.status.zero);
+        assert!(!cpu.status.negative);
+    }
+
+    #[test]
+    fn test_0xa9_lda_zero_flag() {
+        let program = assemble6502!(
+            lda #0x00
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+        assert!(cpu.status.zero);
+    }
+
+    #[test]
+    fn test_0xa9_lda_negative_flag() {
+        let program = assemble6502!(
+            lda #0xff
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+        assert!(cpu.status.negative);
+    }
+
+    #[test]
+    fn test_0xa5_lda_zero_page() {
+        let program = assemble6502!(
+            lda 0x33
+            brk
+        );
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x33, 0x0a);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x0a);
+    }
+
+    #[test]
+    fn test_0xb5_lda_zero_page_x() {
+        let program = assemble6502!(
+            lda #0x2
+            tax
+            lda 0x33,x
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x35, 0x0a);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x0a);
+    }
+
+    #[test]
+    fn test_0xad_lda_absolute() {
+        let program = assemble6502!(
+            lda abs 0x1234
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x1234, 0x08);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x08);
+    }
+
+    #[test]
+    fn test_0xbd_lda_absolute_x() {
+        let program = assemble6502!(
+            ldx #0x1
+            lda abs 0x1234,x
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x1235, 0x08);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x08);
+    }
+
+    #[test]
+    fn test_0xbd_lda_absolute_y() {
+        let program = assemble6502!(
+            ldy #0x1
+            lda abs 0x1234,y
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x1235, 0x08);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x08);
+    }
+    // LDA test --------------------------------------
+
+    // TAX test --------------------------------------
+    #[test]
+    fn test_0xaa_tax() {
+        let program = assemble6502!(
+            lda #0x11
+            tax
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+        assert_eq!(cpu.register_a, 0x11);
+        assert_eq!(cpu.register_x, 0x11);
+        assert!(!cpu.status.zero);
+        assert!(!cpu.status.negative);
+    }
+
+    #[test]
+    fn test_0xaa_tax_zero_flag() {
+        let program = assemble6502!(
+            lda #0x00
+            tax
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+        assert!(cpu.status.zero);
+    }
+    // TAX test --------------------------------------
+
+    // INX test --------------------------------------
+    #[test]
+    fn test_0xe8_inx() {
+        let program = assemble6502!(
+            lda #0x04
+            tax
+            inx
+            brk
+        );
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_x, 5)
+    }
+    #[test]
+    fn test_0xe8_inx_overflow() {
+        let program = assemble6502!(
+            lda #0xff
+            tax
+            inx
+            inx
+            brk
+        );
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_x, 1)
+    }
+    // INX test --------------------------------------
+
+    // Basic program test -------------------------------
+    #[test]
+    fn test_5_ops_working_together() {
+        let program = assemble6502!(
+            lda #0xc0
+            tax
+            inx
+            brk
+        );
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_x, 0xc1)
+    }
+    // Basic program test -------------------------------
+
+    // ADC test ----------------------------------------
+    #[test]
+    fn test_0x69_adc() {
+        let program = assemble6502!(
+            adc #0x04
+            adc #0x04
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x08);
+        assert!(!cpu.status.carry);
+        assert!(!cpu.status.zero);
+        assert!(!cpu.status.overflow);
+        assert!(!cpu.status.negative);
+    }
+
+    #[test]
+    fn test_0x69_adc_overflow() {
+        let program = assemble6502!(
+            adc #0xff
+            adc #0x04
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x03);
+        assert!(cpu.status.carry);
+        assert!(!cpu.status.overflow);
+        assert!(!cpu.status.zero);
+        assert!(!cpu.status.negative);
+    }
+
+    #[test]
+    fn test_0x69_adc_negative() {
+        let program = assemble6502!(
+            adc #0xff
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0xff);
+        assert!(!cpu.status.carry);
+        assert!(!cpu.status.overflow);
+        assert!(!cpu.status.zero);
+        assert!(cpu.status.negative);
+    }
+
+    #[test]
+    fn test_0x69_adc_overflow_zero() {
+        let program = assemble6502!(
+            lda #0xff
+            adc #0x01
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x00);
+        assert!(cpu.status.carry);
+        assert!(cpu.status.zero);
+        assert!(!cpu.status.overflow);
+        assert!(!cpu.status.negative);
+    }
+
+    #[test]
+    fn test_0x65_adc_zero_page() {
+        let program = assemble6502!(
+            lda #0x01
+            adc 0xc4
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write(0xc4, 0x09);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x0a);
+    }
+
+    #[test]
+    fn test_0x75_adc_zero_page_x() {
+        let program = assemble6502!(
+            lda #0x01
+            ldx #0x03
+            adc 0xc4,x
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write(0xc7, 0x09);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x0a);
+    }
+
+    #[test]
+    fn test_0x6d_adc_absolute() {
+        let program = assemble6502!(
+            lda #0x01
+            adc abs 0x1234
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write_16(0x1234, 0x03);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x04);
+    }
+
+    #[test]
+    fn test_0x7d_adc_absolute_x() {
+        let program = assemble6502!(
+            ldx #0x03
+            lda #0x01
+            adc abs 0x1234,x
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write_16(0x1237, 0x03);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x04);
+    }
+
+    #[test]
+    fn test_0x79_adc_absolute_y() {
+        let program = assemble6502!(
+            ldy #0x03
+            lda #0x01
+            adc abs 0x1234,y
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write_16(0x1237, 0x03);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x04);
+    }
+
+    #[test]
+    fn test_0x61_adc_indirect_x() {
+        let program = assemble6502!(
+            ldx #0x03
+            lda #0x01
+            adc (0x12,x)
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write_16(0x15, 0x1234);
+        cpu.mem_write_16(0x1234, 0x03);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x04);
+    }
+
+    #[test]
+    fn test_0x71_adc_indirect_y() {
+        let program = assemble6502!(
+            ldy #0x03
+            lda #0x01
+            adc (0x12),y
+            brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write_16(0x12, 0x1234);
+        cpu.mem_write_16(0x1237, 0x03);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x04);
+    }
+    // ADC test ----------------------------------------
 }

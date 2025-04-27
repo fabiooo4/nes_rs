@@ -13,4 +13,11 @@ name = "nes_rs"
 version = "0.1.0"
 dependencies = [
  "lazy_static",
+ "rustasm6502",
 ]
+
+[[package]]
+name = "rustasm6502"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95d615259776be18891ca8fd794642d57d0bb5ae244ba1611bb0330115d0578b"
