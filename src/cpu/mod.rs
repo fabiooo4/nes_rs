@@ -142,11 +142,11 @@ impl CPU {
                 Code::NOP => continue,
                 Code::ORA => self.ora(&opcode.mode),
                 Code::PHA => self.stack_push(self.register_a),
-                Code::PHP => todo!(),
-                Code::PLA => todo!(),
-                Code::PLP => todo!(),
-                Code::ROL => todo!(),
-                Code::ROR => todo!(),
+                Code::PHP => self.stack_push(self.status.as_byte()),
+                Code::PLA => self.pla(),
+                Code::PLP => self.plp(),
+                Code::ROL => self.rol(&opcode.mode),
+                Code::ROR => self.ror(&opcode.mode),
                 Code::RTI => todo!(),
                 Code::RTS => todo!(),
                 Code::SBC => todo!(),
@@ -706,6 +706,99 @@ impl CPU {
         let target = self.mem_read(param_addr);
 
         self.set_register_a(self.register_a | target);
+    }
+
+    /// Pulls an 8 bit value from the stack and into the accumulator. The zero
+    /// and negative flags are set as appropriate
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles |
+    /// |------------------|--------|-------|--------|
+    /// | Implied          | 68     | 1     | 4      |
+    fn pla(&mut self) {
+        let stack_value = self.stack_pop();
+        self.set_register_a(stack_value);
+    }
+
+    /// Pulls an 8 bit value from the stack and into the processor flags.
+    /// The flags will take on new states as determined by the value pulled
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles |
+    /// |------------------|--------|-------|--------|
+    /// | Implied          | 28     | 1     | 4      |
+    fn plp(&mut self) {
+        let stack_value = self.stack_pop();
+        self.status.set_from_byte(stack_value);
+        self.update_zero_and_negative_flags(stack_value);
+    }
+
+    /// Move each of the bits in either A or M one place to the left. Bit 0 is
+    /// filled with the current value of the carry flag whilst the old bit 7
+    /// becomes the new carry flag value
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Accumulator      | 2A     | 1     | 2                          |
+    /// | Zero Page        | 26     | 2     | 5                          |
+    /// | Zero Page, X     | 36     | 2     | 6                          |
+    /// | Absolute         | 2E     | 3     | 6                          |
+    /// | Absolute, X      | 3E     | 3     | 7                          |
+    fn rol(&mut self, mode: &AddressingMode) {
+        match self.get_parameters_address(mode) {
+            Some(param_addr) => {
+                let value = self.mem_read(param_addr);
+
+                self.status.carry = value & 0b10000000 == 0b10000000;
+                let res = (value << 1) + self.status.carry as u8;
+
+                self.mem_write(param_addr, res);
+                self.update_zero_and_negative_flags(res);
+            }
+            None => {
+                let value = self.register_a;
+
+                self.status.carry = value & 0b10000000 == 0b10000000;
+                let res = (value << 1) + self.status.carry as u8;
+
+                self.set_register_a(res);
+            }
+        };
+    }
+
+    /// Move each of the bits in either A or M one place to the right. Bit 7 is
+    /// filled with the current value of the carry flag whilst the old bit 0
+    /// becomes the new carry flag value
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Accumulator      | 6A     | 1     | 2                          |
+    /// | Zero Page        | 66     | 2     | 5                          |
+    /// | Zero Page, X     | 76     | 2     | 6                          |
+    /// | Absolute         | 6E     | 3     | 6                          |
+    /// | Absolute, X      | 7E     | 3     | 7                          |
+    fn ror(&mut self, mode: &AddressingMode) {
+        match self.get_parameters_address(mode) {
+            Some(param_addr) => {
+                let value = self.mem_read(param_addr);
+
+                self.status.carry = value & 0x01 == 0x01;
+                let res = (value >> 1) | (self.status.carry as u8) << 7;
+
+                self.mem_write(param_addr, res);
+                self.update_zero_and_negative_flags(res);
+            }
+            None => {
+                let value = self.register_a;
+
+                self.status.carry = value & 0x01 == 0x01;
+                let res = (value >> 1) | (self.status.carry as u8) << 7;
+
+                self.set_register_a(res);
+            }
+        };
     }
 
     /// Copies the current contents of the accumulator into the X register and
@@ -1668,4 +1761,82 @@ mod test {
         assert!(!cpu.status.zero);
     }
     // Status as/from byte test -----------------------------
+
+    // PHP test ---------------------------------------------
+    #[test]
+    fn test_0x08_php() {
+        let program = assemble6502!(
+            lda #0x02
+            cmp #0x02
+            php
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.stack_pop(), 0b00100011)
+    }
+    // PHP test ---------------------------------------------
+
+    // ROL test ---------------------------------------------
+    #[test]
+    fn test_0x2a_rol_accumulator() {
+        let program = assemble6502!(
+            lda #0b11000000
+            rol a
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0b10000001);
+        assert!(cpu.status.carry);
+    }
+
+    #[test]
+    fn test_0x2a_rol_accumulator_2() {
+        let program = assemble6502!(
+            lda #0b11000000
+            rol a
+            rol a
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0b00000011);
+        assert!(cpu.status.carry);
+    }
+    // ROL test ---------------------------------------------
+
+    // ROR test ---------------------------------------------
+    #[test]
+    fn test_0x6a_ror_accumulator() {
+        let program = assemble6502!(
+            lda #0b00000011
+            ror a
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0b10000001);
+        assert!(cpu.status.carry);
+    }
+
+    #[test]
+    fn test_0x6a_ror_accumulator_2() {
+        let program = assemble6502!(
+            lda #0b00000011
+            ror a
+            ror a
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0b11000000);
+        assert!(cpu.status.carry);
+    }
+    // ROR test ---------------------------------------------
 }

@@ -36,6 +36,12 @@ lazy_static! {
         // Stack ==================================================
         // Push accumulator
         (0x48, Opcode::new(Code::PHA, AddressingMode::Implied)),
+        // Push processor status
+        (0x08, Opcode::new(Code::PHP, AddressingMode::Implied)),
+        // Pull accumulator
+        (0x68, Opcode::new(Code::PLA, AddressingMode::Implied)),
+        // Pull processor status
+        (0x28, Opcode::new(Code::PLP, AddressingMode::Implied)),
         // Stack ==================================================
 
         // Arithmetic =============================================
@@ -102,6 +108,22 @@ lazy_static! {
         (0x4E, Opcode::new(Code::LSR, AddressingMode::Absolute)),
         (0x5E, Opcode::new(Code::LSR, AddressingMode::Absolute_X)),
         // Logical shift right ------------------------------------
+
+        // Rotate left --------------------------------------------
+        (0x2A, Opcode::new(Code::ROL, AddressingMode::Implied)),
+        (0x26, Opcode::new(Code::ROL, AddressingMode::ZeroPage)),
+        (0x36, Opcode::new(Code::ROL, AddressingMode::ZeroPage_X)),
+        (0x2E, Opcode::new(Code::ROL, AddressingMode::Absolute)),
+        (0x3E, Opcode::new(Code::ROL, AddressingMode::Absolute_X)),
+        // Rotate left --------------------------------------------
+
+        // Rotate right --------------------------------------------
+        (0x6A, Opcode::new(Code::ROR, AddressingMode::Implied)),
+        (0x66, Opcode::new(Code::ROR, AddressingMode::ZeroPage)),
+        (0x76, Opcode::new(Code::ROR, AddressingMode::ZeroPage_X)),
+        (0x6E, Opcode::new(Code::ROR, AddressingMode::Absolute)),
+        (0x7E, Opcode::new(Code::ROR, AddressingMode::Absolute_X)),
+        // Rotate right --------------------------------------------
 
         // Bit test -----------------------------------------------
         (0x24, Opcode::new(Code::BIT, AddressingMode::ZeroPage)),
