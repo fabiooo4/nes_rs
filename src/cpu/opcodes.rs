@@ -3,9 +3,12 @@ use std::collections::HashMap;
 
 lazy_static! {
     pub static ref CPU_OPCODES: HashMap<u8, Opcode> = HashMap::from([
+        // Break
         (0x00, Opcode::new(Code::BRK, AddressingMode::Implied),),
-        (0xaa, Opcode::new(Code::TAX, AddressingMode::Implied),),
-        (0xe8, Opcode::new(Code::INX, AddressingMode::Implied),),
+        // No operation
+        (0xEA, Opcode::new(Code::NOP, AddressingMode::Implied),),
+
+        (0xAA, Opcode::new(Code::TAX, AddressingMode::Implied),),
 
         // Load ===================================================
         (0xA9, Opcode::new(Code::LDA, AddressingMode::Immediate)),
@@ -30,6 +33,11 @@ lazy_static! {
         (0xBC, Opcode::new(Code::LDY, AddressingMode::Absolute_X)),
         // Load ===================================================
 
+        // Stack ==================================================
+        // Push accumulator
+        (0x48, Opcode::new(Code::PHA, AddressingMode::Implied)),
+        // Stack ==================================================
+
         // Arithmetic =============================================
         // Add ----------------------------------------------------
         (0x69, Opcode::new(Code::ADC, AddressingMode::Immediate)),
@@ -53,6 +61,18 @@ lazy_static! {
         (0xCA, Opcode::new(Code::DEX, AddressingMode::Implied)),
         // Decrement Y
         (0x88, Opcode::new(Code::DEY, AddressingMode::Implied)),
+
+        // Increment memory ----------------------------------------
+        (0xE6, Opcode::new(Code::INC, AddressingMode::ZeroPage)),
+        (0xF6, Opcode::new(Code::INC, AddressingMode::ZeroPage_X)),
+        (0xEE, Opcode::new(Code::INC, AddressingMode::Absolute)),
+        (0xFE, Opcode::new(Code::INC, AddressingMode::Absolute_X)),
+        // Increment memory ----------------------------------------
+
+        // Increment X
+        (0xE8, Opcode::new(Code::INX, AddressingMode::Implied),),
+        // Increment Y
+        (0xC8, Opcode::new(Code::INY, AddressingMode::Implied),),
         // Arithmetic =============================================
 
         // Boolean arithmetic =====================================
@@ -75,12 +95,20 @@ lazy_static! {
         (0x1E, Opcode::new(Code::ASL, AddressingMode::Absolute_X)),
         // Accumulator shift left ---------------------------------
 
+        // Logical shift right ------------------------------------
+        (0x4A, Opcode::new(Code::LSR, AddressingMode::Implied)),
+        (0x46, Opcode::new(Code::LSR, AddressingMode::ZeroPage)),
+        (0x56, Opcode::new(Code::LSR, AddressingMode::ZeroPage_X)),
+        (0x4E, Opcode::new(Code::LSR, AddressingMode::Absolute)),
+        (0x5E, Opcode::new(Code::LSR, AddressingMode::Absolute_X)),
+        // Logical shift right ------------------------------------
+
         // Bit test -----------------------------------------------
         (0x24, Opcode::new(Code::BIT, AddressingMode::ZeroPage)),
         (0x2C, Opcode::new(Code::BIT, AddressingMode::Absolute)),
         // Bit test -----------------------------------------------
 
-        // And ----------------------------------------------------
+        // Exclusive Or -------------------------------------------
         (0x49, Opcode::new(Code::EOR, AddressingMode::Immediate)),
         (0x45, Opcode::new(Code::EOR, AddressingMode::ZeroPage)),
         (0x55, Opcode::new(Code::EOR, AddressingMode::ZeroPage_X)),
@@ -89,7 +117,18 @@ lazy_static! {
         (0x59, Opcode::new(Code::EOR, AddressingMode::Absolute_Y)),
         (0x41, Opcode::new(Code::EOR, AddressingMode::Indirect_X)),
         (0x51, Opcode::new(Code::EOR, AddressingMode::Indirect_Y)),
-        // And ----------------------------------------------------
+        // Exclusive Or -------------------------------------------
+
+        // Logical Inclusive Or -----------------------------------
+        (0x09, Opcode::new(Code::ORA, AddressingMode::Immediate)),
+        (0x05, Opcode::new(Code::ORA, AddressingMode::ZeroPage)),
+        (0x15, Opcode::new(Code::ORA, AddressingMode::ZeroPage_X)),
+        (0x0D, Opcode::new(Code::ORA, AddressingMode::Absolute)),
+        (0x1D, Opcode::new(Code::ORA, AddressingMode::Absolute_X)),
+        (0x19, Opcode::new(Code::ORA, AddressingMode::Absolute_Y)),
+        (0x01, Opcode::new(Code::ORA, AddressingMode::Indirect_X)),
+        (0x11, Opcode::new(Code::ORA, AddressingMode::Indirect_Y)),
+        // Logical Inclusive Or -----------------------------------
         // Boolean arithmetic =====================================
 
         // Branching ==============================================
@@ -109,6 +148,14 @@ lazy_static! {
         (0x50, Opcode::new(Code::BVC, AddressingMode::Immediate)),
         // Branch if overflow set
         (0x70, Opcode::new(Code::BVS, AddressingMode::Immediate)),
+
+        // Jump ---------------------------------------------------
+        (0x4C, Opcode::new(Code::JMP, AddressingMode::Absolute)),
+        (0x6C, Opcode::new(Code::JMP, AddressingMode::Indirect)),
+        // Jump ---------------------------------------------------
+
+        // Jump to subroutine
+        (0x20, Opcode::new(Code::JSR, AddressingMode::Absolute)),
         // Branching ==============================================
 
         // Status bits ============================================
@@ -169,6 +216,7 @@ pub enum AddressingMode {
     Absolute,
     Absolute_X,
     Absolute_Y,
+    Indirect,
     Indirect_X,
     Indirect_Y,
     Implied,

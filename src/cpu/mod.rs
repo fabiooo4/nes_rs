@@ -2,12 +2,16 @@ mod opcodes;
 use core::panic;
 use opcodes::{AddressingMode, Code};
 
+const STACK: u16 = 0x0100;
+const STACK_RESET: u8 = 0xff;
+
 pub struct CPU {
     register_a: u8,
     register_x: u8,
     register_y: u8,
     status: Status,
     program_counter: u16,
+    stack_pointer: u8,
     memory: [u8; 0xFFFF],
 }
 
@@ -56,6 +60,7 @@ impl CPU {
             register_y: 0,
             status: Status::new(),
             program_counter: 0,
+            stack_pointer: STACK_RESET,
             memory: [0; 0xFFFF],
         }
     }
@@ -125,18 +130,18 @@ impl CPU {
                 Code::DEX => self.dex(),
                 Code::DEY => self.dey(),
                 Code::EOR => self.eor(&opcode.mode),
-                Code::INC => todo!(),
+                Code::INC => self.inc(&opcode.mode),
                 Code::INX => self.inx(),
-                Code::INY => todo!(),
-                Code::JMP => todo!(),
-                Code::JSR => todo!(),
+                Code::INY => self.iny(),
+                Code::JMP => self.jmp(&opcode.mode),
+                Code::JSR => self.jsr(),
                 Code::LDA => self.lda(&opcode.mode),
                 Code::LDX => self.ldx(&opcode.mode),
                 Code::LDY => self.ldy(&opcode.mode),
-                Code::LSR => todo!(),
-                Code::NOP => todo!(),
-                Code::ORA => todo!(),
-                Code::PHA => todo!(),
+                Code::LSR => self.lsr(&opcode.mode),
+                Code::NOP => continue,
+                Code::ORA => self.ora(&opcode.mode),
+                Code::PHA => self.stack_push(self.register_a),
                 Code::PHP => todo!(),
                 Code::PLA => todo!(),
                 Code::PLP => todo!(),
@@ -171,6 +176,43 @@ impl CPU {
     fn update_zero_and_negative_flags(&mut self, result: u8) {
         self.status.zero = result == 0;
         self.status.negative = result & 0b10000000 == 0b10000000;
+    }
+
+    /// Push a byte to the stack
+    fn stack_push(&mut self, value: u8) {
+        if self.stack_pointer.checked_sub(1).is_none() {
+            panic!("Stack overflow")
+        }
+
+        self.mem_write(STACK + self.stack_pointer as u16, value);
+        self.stack_pointer -= 1;
+    }
+
+    // Push a 16 bit value to the stack
+    fn stack_push_16(&mut self, value: u16) {
+        let high = (value >> 8) as u8;
+        let low = (value & 0xff) as u8;
+
+        self.stack_push(high);
+        self.stack_push(low);
+    }
+
+    /// Pop a byte from the stack
+    fn stack_pop(&mut self) -> u8 {
+        if self.stack_pointer.checked_add(1).is_none() {
+            panic!("Stack overflow")
+        }
+        let res = self.mem_read(STACK + self.stack_pointer as u16 + 1);
+        self.stack_pointer += 1;
+        res
+    }
+
+    // Pop a 16 bit value from the stack
+    fn stack_pop_16(&mut self) -> u16 {
+        let low = self.stack_pop() as u16;
+        let high = self.stack_pop() as u16;
+
+        high << 8 | low
     }
 
     /// Gets the address of the operand parameters based on the addressing mode.
@@ -208,6 +250,18 @@ impl CPU {
                 self.mem_read_16(self.program_counter)
                     .wrapping_add(self.register_y as u16),
             ),
+
+            AddressingMode::Indirect => {
+                let base = self.mem_read(self.program_counter);
+                let low = self.mem_read(base as u16) as u16;
+                let high = self.mem_read(base as u16 + 1) as u16;
+
+                let deref_base = high << 8 | low;
+
+                self.program_counter += 2;
+
+                Some(deref_base)
+            }
 
             AddressingMode::Indirect_X => {
                 let base = self
@@ -248,6 +302,7 @@ impl CPU {
             AddressingMode::Absolute
             | AddressingMode::Absolute_X
             | AddressingMode::Absolute_Y
+            | AddressingMode::Indirect
             | AddressingMode::Indirect_X
             | AddressingMode::Indirect_Y => {
                 self.program_counter = self.program_counter.wrapping_add(2)
@@ -472,6 +527,26 @@ impl CPU {
         self.set_register_a(self.register_a ^ target);
     }
 
+    /// Adds one to the value held at a specified memory location setting the
+    /// zero and negative flags as appropriate
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | E6     | 2     | 5                          |
+    /// | Zero Page, X     | F6     | 2     | 6                          |
+    /// | Absolute         | EE     | 3     | 6                          |
+    /// | Absolute, X      | FE     | 3     | 7                          |
+    fn inc(&mut self, mode: &AddressingMode) {
+        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let value = self.mem_read(param_addr);
+        let res = value.wrapping_add(1);
+
+        self.mem_write(param_addr, res);
+
+        self.update_zero_and_negative_flags(res);
+    }
+
     /// Adds one to the X register setting the zero and negative flags as appropriate
     ///
     /// ## Addressing modes
@@ -481,6 +556,44 @@ impl CPU {
     fn inx(&mut self) {
         self.register_x = self.register_x.wrapping_add(1);
         self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    /// Adds one to the Y register setting the zero and negative flags as appropriate
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles |
+    /// |------------------|--------|-------|--------|
+    /// | Implied          | C8     | 1     | 2      |
+    fn iny(&mut self) {
+        self.register_y = self.register_y.wrapping_add(1);
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    /// Sets the program counter to the address specified by the operand
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Absolute         | 4C     | 3     | 3                          |
+    /// | Indirect         | 6C     | 3     | 5                          |
+    fn jmp(&mut self, mode: &AddressingMode) {
+        let target_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+
+        self.program_counter = target_addr;
+    }
+
+    /// The JSR instruction pushes the address (minus one) of the return point
+    /// on to the stack and then sets the program counter to the target memory address
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Absolute         | 20     | 3     | 6                          |
+    fn jsr(&mut self) {
+        self.stack_push_16(self.program_counter.wrapping_sub(1));
+        let target_addr = self.get_parameters_address(&AddressingMode::Absolute).unwrap(/* safe */);
+
+        self.program_counter = target_addr;
     }
 
     /// Loads a byte of memory into the accumulator setting the zero and
@@ -540,6 +653,59 @@ impl CPU {
 
         self.register_y = value;
         self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    /// Each of the bits in A or M is shifted one place to the right. The bit that
+    /// was in bit 0 is shifted into the carry flag. Bit 7 is set to zero
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Implied          | 4A     | 1     | 2                          |
+    /// | Zero Page        | 46     | 2     | 5                          |
+    /// | Zero Page, X     | 56     | 2     | 6                          |
+    /// | Absolute         | 4E     | 3     | 6                          |
+    /// | Absolute, X      | 5E     | 3     | 7                          |
+    fn lsr(&mut self, mode: &AddressingMode) {
+        match self.get_parameters_address(mode) {
+            Some(param_addr) => {
+                let mem_value = self.mem_read(param_addr);
+
+                self.status.carry = mem_value & 0x01 == 0x01;
+
+                let res = mem_value >> 1;
+                self.mem_write(param_addr, res);
+
+                self.update_zero_and_negative_flags(res);
+            }
+            None => {
+                self.status.carry = self.register_a & 0x01 == 0x01;
+
+                self.register_a >>= 1;
+                self.update_zero_and_negative_flags(self.register_a);
+            }
+        }
+    }
+
+    /// An inclusive OR is performed, bit by bit, on the accumulator contents
+    /// using the contents of a byte of memory
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Immediate        | 09     | 2     | 2                          |
+    /// | Zero Page        | 05     | 2     | 3                          |
+    /// | Zero Page, X     | 15     | 2     | 4                          |
+    /// | Absolute         | 0D     | 3     | 4                          |
+    /// | Absolute, X      | 1D     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, Y      | 19     | 3     | 4 (+1 if page crossed)     |
+    /// | (Indirect, X)    | 01     | 2     | 6                          |
+    /// | (Indirect), Y    | 11     | 2     | 5 (+1 if page crossed)     |
+    fn ora(&mut self, mode: &AddressingMode) {
+        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let target = self.mem_read(param_addr);
+
+        self.set_register_a(self.register_a | target);
     }
 
     /// Copies the current contents of the accumulator into the X register and
@@ -621,12 +787,33 @@ impl Status {
         Status {
             negative: false,
             overflow: false,
+            brk: false,
             decimal: false,
             interrupt_disable: false,
             zero: false,
             carry: false,
-            brk: false,
         }
+    }
+
+    fn as_byte(&self) -> u8 {
+        (self.negative as u8) << 7
+            | (self.overflow as u8) << 6
+            | 0x1 << 5
+            | (self.brk as u8) << 4
+            | (self.decimal as u8) << 3
+            | (self.interrupt_disable as u8) << 2
+            | (self.zero as u8) << 1
+            | self.carry as u8
+    }
+
+    fn set_from_byte(&mut self, byte: u8) {
+        self.negative = byte & 0b10000000 == 0b10000000;
+        self.overflow = byte & 0b01000000 == 0b01000000;
+        self.brk = byte & 0b00010000 == 0b00010000;
+        self.decimal = byte & 0b00001000 == 0b00001000;
+        self.interrupt_disable = byte & 0b00000100 == 0b00000100;
+        self.zero = byte & 0b00000010 == 0b00000010;
+        self.carry = byte & 0b00000001 == 0b00000001;
     }
 }
 
@@ -1326,4 +1513,159 @@ mod test {
         assert_eq!(cpu.register_a, 0xff);
     }
     // EOR test ----------------------------------------
+
+    // JMP test ----------------------------------------
+    #[test]
+    fn test_0x4c_jmp_absolute() {
+        // jmp start
+        // lda #0xfe
+        // adc #0x01
+        // start:
+        //   lda #0x05
+        //   brk
+        let program = [0x4c, 0x07, 0x80, 0xa9, 0xfe, 0x69, 0x01, 0xa9, 0x05, 0x00];
+
+        let mut cpu = CPU::new();
+        cpu.load(&program);
+        cpu.reset();
+        let pc = cpu.program_counter;
+        assert!(!cpu.status.carry);
+        cpu.run();
+
+        assert_eq!(cpu.register_a, 0x05);
+        assert_eq!(cpu.program_counter, pc + 10);
+    }
+    // JMP test ----------------------------------------
+
+    // Stack test --------------------------------------
+    #[test]
+    fn test_stack_push() {
+        let mut cpu = CPU::new();
+
+        assert_eq!(cpu.stack_pointer, STACK_RESET);
+        cpu.stack_push(0x69);
+        assert_eq!(cpu.stack_pointer, STACK_RESET - 1);
+
+        assert_eq!(cpu.mem_read(STACK + (cpu.stack_pointer as u16 + 1)), 0x69)
+    }
+
+    #[test]
+    fn test_stack_pop() {
+        let mut cpu = CPU::new();
+
+        cpu.stack_push(0x69);
+        assert_eq!(cpu.stack_pointer, STACK_RESET - 1);
+        assert_eq!(cpu.stack_pop(), 0x69);
+        assert_eq!(cpu.stack_pointer, STACK_RESET);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stack_overflow() {
+        let mut cpu = CPU::new();
+
+        for i in 0..STACK_RESET {
+            cpu.stack_push(i);
+        }
+
+        assert_eq!(cpu.stack_pointer, 0x00);
+
+        cpu.stack_push(0xff); // Stack overflow
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stack_underflow() {
+        let mut cpu = CPU::new();
+        cpu.stack_pop(); // Stack underflow
+    }
+    // Stack test --------------------------------------
+
+    // JSR test ----------------------------------------
+    #[test]
+    fn test_0x20_jsr_absolute() {
+        let program = assemble6502!(
+            jsr end
+            end:
+              brk
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.stack_pop_16(), cpu.mem_read_16(0xFFFC));
+    }
+    // JSR test ----------------------------------------
+
+    // LSR test ----------------------------------------
+    #[test]
+    fn test_0x4a_lsr_implied() {
+        let program = assemble6502!(
+           lda #0x02
+           lsr a
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.register_a, 0x01);
+        assert!(!cpu.status.carry);
+    }
+
+    #[test]
+    fn test_0x4e_lsr_absolute() {
+        let program = assemble6502!(
+           lsr abs 0x1234
+        );
+
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x1234, 0x03);
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.mem_read(0x1234), 0x01);
+        assert!(cpu.status.carry);
+    }
+    // LSR test ----------------------------------------
+
+    // PHA test ----------------------------------------
+    #[test]
+    fn test_0x48_pha() {
+        let program = assemble6502!(
+            lda #0x69
+            pha
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.stack_pop(), 0x69);
+    }
+    // PHA test ----------------------------------------
+
+    // Status as/from byte test -----------------------------
+    #[test]
+    fn test_status_as_byte() {
+        let mut cpu = CPU::new();
+        cpu.status.negative = true;
+        cpu.status.carry = true;
+        cpu.status.brk = true;
+
+        assert_eq!(cpu.status.as_byte(), 0b10110001);
+    }
+
+    #[test]
+    fn test_status_set_from_byte() {
+        let mut cpu = CPU::new();
+
+        cpu.status.set_from_byte(0b10110001);
+
+        assert!(cpu.status.negative);
+        assert!(cpu.status.carry);
+        assert!(cpu.status.brk);
+        assert!(!cpu.status.interrupt_disable);
+        assert!(!cpu.status.overflow);
+        assert!(!cpu.status.decimal);
+        assert!(!cpu.status.zero);
+    }
+    // Status as/from byte test -----------------------------
 }
