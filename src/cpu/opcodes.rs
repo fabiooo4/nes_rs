@@ -4,11 +4,24 @@ use std::collections::HashMap;
 lazy_static! {
     pub static ref CPU_OPCODES: HashMap<u8, Opcode> = HashMap::from([
         // Break
-        (0x00, Opcode::new(Code::BRK, AddressingMode::Implied),),
+        (0x00, Opcode::new(Code::BRK, AddressingMode::Implied)),
         // No operation
-        (0xEA, Opcode::new(Code::NOP, AddressingMode::Implied),),
+        (0xEA, Opcode::new(Code::NOP, AddressingMode::Implied)),
 
-        (0xAA, Opcode::new(Code::TAX, AddressingMode::Implied),),
+        // Transfers ==============================================
+        // Transfer A to X
+        (0xAA, Opcode::new(Code::TAX, AddressingMode::Implied)),
+        // Transfer A to Y
+        (0xA8, Opcode::new(Code::TAY, AddressingMode::Implied)),
+        // Transfer Stack to X
+        (0xBA, Opcode::new(Code::TSX, AddressingMode::Implied)),
+        // Transfer X to A
+        (0x8A, Opcode::new(Code::TXA, AddressingMode::Implied)),
+        // Transfer X to Stack
+        (0x9A, Opcode::new(Code::TXS, AddressingMode::Implied)),
+        // Transfer Y to A
+        (0x98, Opcode::new(Code::TYA, AddressingMode::Implied)),
+        // Transfers ==============================================
 
         // Load ===================================================
         (0xA9, Opcode::new(Code::LDA, AddressingMode::Immediate)),
@@ -33,6 +46,24 @@ lazy_static! {
         (0xBC, Opcode::new(Code::LDY, AddressingMode::Absolute_X)),
         // Load ===================================================
 
+        // Store ==================================================
+        (0x85, Opcode::new(Code::STA, AddressingMode::ZeroPage)),
+        (0x95, Opcode::new(Code::STA, AddressingMode::ZeroPage_X)),
+        (0x8D, Opcode::new(Code::STA, AddressingMode::Absolute)),
+        (0x9D, Opcode::new(Code::STA, AddressingMode::Absolute_X)),
+        (0x99, Opcode::new(Code::STA, AddressingMode::Absolute_Y)),
+        (0x81, Opcode::new(Code::STA, AddressingMode::Indirect_X)),
+        (0x91, Opcode::new(Code::STA, AddressingMode::Indirect_Y)),
+
+        (0x86, Opcode::new(Code::STX, AddressingMode::ZeroPage)),
+        (0x96, Opcode::new(Code::STX, AddressingMode::ZeroPage_Y)),
+        (0x8E, Opcode::new(Code::STX, AddressingMode::Absolute)),
+
+        (0x84, Opcode::new(Code::STY, AddressingMode::ZeroPage)),
+        (0x94, Opcode::new(Code::STY, AddressingMode::ZeroPage_X)),
+        (0x8C, Opcode::new(Code::STY, AddressingMode::Absolute)),
+        // Store ==================================================
+
         // Stack ==================================================
         // Push accumulator
         (0x48, Opcode::new(Code::PHA, AddressingMode::Implied)),
@@ -55,6 +86,17 @@ lazy_static! {
         (0x61, Opcode::new(Code::ADC, AddressingMode::Indirect_X)),
         (0x71, Opcode::new(Code::ADC, AddressingMode::Indirect_Y)),
         // Add ----------------------------------------------------
+
+        // Subtract -----------------------------------------------
+        (0xE9, Opcode::new(Code::SBC, AddressingMode::Immediate)),
+        (0xE5, Opcode::new(Code::SBC, AddressingMode::ZeroPage)),
+        (0xF5, Opcode::new(Code::SBC, AddressingMode::ZeroPage_X)),
+        (0xED, Opcode::new(Code::SBC, AddressingMode::Absolute)),
+        (0xFD, Opcode::new(Code::SBC, AddressingMode::Absolute_X)),
+        (0xF9, Opcode::new(Code::SBC, AddressingMode::Absolute_Y)),
+        (0xE1, Opcode::new(Code::SBC, AddressingMode::Indirect_X)),
+        (0xF1, Opcode::new(Code::SBC, AddressingMode::Indirect_Y)),
+        // Subtract -----------------------------------------------
 
         // Decrement memory ----------------------------------------
         (0xC6, Opcode::new(Code::DEC, AddressingMode::ZeroPage)),
@@ -176,8 +218,13 @@ lazy_static! {
         (0x6C, Opcode::new(Code::JMP, AddressingMode::Indirect)),
         // Jump ---------------------------------------------------
 
+        // Return from Interrupt
+        (0x40, Opcode::new(Code::RTI, AddressingMode::Implied)),
+
         // Jump to subroutine
         (0x20, Opcode::new(Code::JSR, AddressingMode::Absolute)),
+        // Return from subroutine
+        (0x60, Opcode::new(Code::RTS, AddressingMode::Implied)),
         // Branching ==============================================
 
         // Status bits ============================================
@@ -189,6 +236,13 @@ lazy_static! {
         (0x58, Opcode::new(Code::CLI, AddressingMode::Implied)),
         // Clear overflow flag
         (0xB8, Opcode::new(Code::CLV, AddressingMode::Implied)),
+
+        // Set carry flag
+        (0x38, Opcode::new(Code::SEC, AddressingMode::Implied)),
+        // Set decimal mode
+        (0xF8, Opcode::new(Code::SED, AddressingMode::Implied)),
+        // Set interrupt disable
+        (0x78, Opcode::new(Code::SEI, AddressingMode::Implied)),
 
         // Compare A ----------------------------------------------
         (0xC9, Opcode::new(Code::CMP, AddressingMode::Immediate)),
