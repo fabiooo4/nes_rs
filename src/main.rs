@@ -9,6 +9,7 @@ use sdl2::{
     pixels::{Color, PixelFormatEnum},
 };
 
+/// Handles ESC, and WASD
 fn handle_user_input(cpu: &mut CPU, event_pump: &mut EventPump) {
     for event in event_pump.poll_iter() {
         match event {
@@ -46,6 +47,7 @@ fn handle_user_input(cpu: &mut CPU, event_pump: &mut EventPump) {
     }
 }
 
+/// Converts a byte into color
 fn color(color: u8) -> Color {
     match color {
         0 => Color::BLACK,
@@ -60,6 +62,11 @@ fn color(color: u8) -> Color {
     }
 }
 
+/// Checks if screen has changed before updating
+///
+/// # Return
+/// Returns `true` if the screen needs to be updated,
+/// `false` otherwise
 fn read_screen_state(cpu: &CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
     let mut frame_idx = 0;
     let mut update = false;
@@ -82,7 +89,7 @@ fn main() {
     let sdl_content = sdl2::init().unwrap();
     let video_subsystem = sdl_content.video().unwrap();
 
-    let scale = 10;
+    let scale = 20;
     let window = video_subsystem
         .window("NES", 32 * scale, 32 * scale)
         .position_centered()
@@ -92,11 +99,13 @@ fn main() {
     let mut canvas = window.into_canvas().present_vsync().build().unwrap();
     let mut event_pump = sdl_content.event_pump().unwrap();
     canvas.set_scale(scale as f32, scale as f32).unwrap();
-    // SDL init -----------------------------------------------------------
 
     // Texture
     let creator = canvas.texture_creator();
-    let mut texture = creator.create_texture_target(PixelFormatEnum::RGB24, 32, 32).unwrap();
+    let mut texture = creator
+        .create_texture_target(PixelFormatEnum::RGB24, 32, 32)
+        .unwrap();
+    // SDL init -----------------------------------------------------------
 
     // https://gist.github.com/wkjagt/9043907
     let game_code = vec![
@@ -130,6 +139,8 @@ fn main() {
     let mut rng = rand::rng();
     let mut screen = [0; 32 * 3 * 32];
     cpu.run_with_callback(move |cpu| {
+        // This game code assumes the following table:
+        //
         // | Address space    | Type      | Description                          |
         // |------------------|-----------|--------------------------------------|
         // | 0xFE             | Input     | Random number generator              |
@@ -140,7 +151,7 @@ fn main() {
         // |                  |           | from the top left corner.            |
         // | [0x0600..]       | Game Code | Execution code                       |
 
-        cpu.mem_write(0xFE, rng.random_range(0..=0xFF));
+        cpu.mem_write(0xFE, rng.random_range(0..=0xF));
         handle_user_input(cpu, &mut event_pump);
 
         if read_screen_state(cpu, &mut screen) {
@@ -149,6 +160,6 @@ fn main() {
             canvas.present();
         }
 
-        sleep(Duration::new(0, 70_000));
+        sleep(Duration::new(0, 50_000));
     });
 }

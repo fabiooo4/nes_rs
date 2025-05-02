@@ -1,6 +1,9 @@
 mod opcodes;
-use core::panic;
 use opcodes::{AddressingMode, Code};
+use std::{
+    fmt::Debug,
+    io::{Write, stdin, stdout},
+};
 
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xff;
@@ -15,6 +18,49 @@ pub struct CPU {
     memory: [u8; 0xFFFF],
 }
 
+impl Debug for CPU {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let code = self.mem_read(self.program_counter);
+        let opcode = opcodes::CPU_OPCODES
+            .get(&code)
+            .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
+
+        let mut s = String::new();
+        let _ = stdout().flush();
+        stdin()
+            .read_line(&mut s)
+            .expect("Did not enter a correct string");
+
+        writeln!(
+            f,
+            "Next instruction: {:02X?}|{:?}",
+            opcode.code, opcode.mode
+        )?;
+        writeln!(
+            f,
+            "PC:{:04X?} SP:{:02X?} {:08b}",
+            self.program_counter,
+            self.stack_pointer,
+            self.status.as_byte()
+        )?;
+        writeln!(
+            f,
+            "A:{:02X?} X:{:02X?} Y:{:02X?}",
+            self.register_a, self.register_x, self.register_y
+        )?;
+
+        for col in (0x0000_u16..=0x0100_u16).step_by(0x10) {
+            write!(f, "{:04X}:  ", col)?;
+            for row in 0x0_u8..=0xf_u8 {
+                write!(f, "{:02X} ", self.mem_read(col + row as u16))?;
+            }
+            writeln!(f)?;
+        }
+
+        Ok(())
+    }
+}
+
 pub trait Memory {
     fn mem_read(&self, addr: u16) -> u8;
     fn mem_write(&mut self, addr: u16, data: u8);
@@ -26,14 +72,14 @@ pub trait Memory {
         let low = (data >> 8) as u8;
 
         self.mem_write(addr, high);
-        self.mem_write(addr + 1, low);
+        self.mem_write(addr.wrapping_add(1), low);
     }
 
     /// Reads a 16-bit value from memory (little endian)
     fn mem_read_16(&self, addr: u16) -> u16 {
         // Little endian
         let low = self.mem_read(addr) as u16;
-        let high = self.mem_read(addr + 1) as u16;
+        let high = self.mem_read(addr.wrapping_add(1)) as u16;
 
         high << 8 | low
     }
@@ -102,6 +148,12 @@ impl CPU {
     /// # Panics
     /// If an invalid opcode is encountered, the CPU will panic.
     pub fn run_with_callback<F: FnMut(&mut CPU)>(&mut self, mut callback: F) {
+        #[cfg(debug_assertions)]
+        {
+            println!("Running in debug mode (to execute normally use 'cargo run --release'):");
+            println!("Press enter to step to the next instruction");
+        }
+
         loop {
             callback(self);
 
@@ -109,8 +161,6 @@ impl CPU {
             let opcode = opcodes::CPU_OPCODES
                 .get(&code)
                 .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
-
-            println!("OPCODE: {:X?} pc: {:X?}", opcode, self.program_counter);
 
             self.program_counter += 1;
 
@@ -175,6 +225,10 @@ impl CPU {
                 Code::TXS => self.stack_pointer = self.register_x,
                 Code::TYA => self.set_register_a(self.register_y),
             }
+
+            // Step run on user input
+            #[cfg(debug_assertions)]
+            println!("{:?}", self);
         }
     }
 
@@ -270,8 +324,6 @@ impl CPU {
 
                 let deref_base = high << 8 | low;
 
-                self.program_counter += 2;
-
                 Some(deref_base)
             }
 
@@ -282,8 +334,6 @@ impl CPU {
                 let low = self.mem_read(base as u16) as u16;
                 let high = self.mem_read(base.wrapping_add(1) as u16) as u16;
 
-                self.program_counter += 2;
-
                 Some(high << 8 | low)
             }
 
@@ -293,8 +343,6 @@ impl CPU {
                 let high = self.mem_read(base as u16 + 1) as u16;
 
                 let deref_base = high << 8 | low;
-
-                self.program_counter += 2;
 
                 Some(deref_base.wrapping_add(self.register_y as u16))
             }
@@ -307,16 +355,16 @@ impl CPU {
             AddressingMode::Immediate
             | AddressingMode::ZeroPage
             | AddressingMode::ZeroPage_X
-            | AddressingMode::ZeroPage_Y => {
+            | AddressingMode::ZeroPage_Y
+            | AddressingMode::Indirect_X
+            | AddressingMode::Indirect_Y => {
                 self.program_counter = self.program_counter.wrapping_add(1)
             }
 
             AddressingMode::Absolute
             | AddressingMode::Absolute_X
             | AddressingMode::Absolute_Y
-            | AddressingMode::Indirect
-            | AddressingMode::Indirect_X
-            | AddressingMode::Indirect_Y => {
+            | AddressingMode::Indirect => {
                 self.program_counter = self.program_counter.wrapping_add(2)
             }
 
@@ -943,6 +991,7 @@ impl Default for CPU {
 /// |+-------- Overflow
 /// +--------- Negative
 /// ```
+#[derive(Debug)]
 struct Status {
     /// The negative flag is set if the result of the last operation had bit 7
     /// set to a one
@@ -1719,21 +1768,31 @@ mod test {
     // JMP test ----------------------------------------
     #[test]
     fn test_0x4c_jmp_absolute() {
-        // jmp start
-        // lda #0xfe
-        // adc #0x01
-        // start:
-        //   lda #0x05
-        //   brk
-        let program = [0x4c, 0x07, 0x80, 0xa9, 0xfe, 0x69, 0x01, 0xa9, 0x05, 0x00];
+        let mut program = assemble6502!(
+            jmp start
+            lda #0xfe
+            adc #0x01
+            start:
+              lda #0x05
+              brk
+        );
 
         let mut cpu = CPU::new();
         cpu.load(&program);
         cpu.reset();
+
+        // Update program start offset
+        let program_start = cpu.mem_read_16(0xFFFC);
+        let program_jmp = program_start + ((program[2] as u16) << 8 | program[1] as u16);
+        program[1] = program_jmp as u8;
+        program[2] = (program_jmp >> 8) as u8;
+
+        cpu.load(&program);
+        cpu.reset();
         let pc = cpu.program_counter;
-        assert!(!cpu.status.carry);
         cpu.run();
 
+        assert!(!cpu.status.carry);
         assert_eq!(cpu.register_a, 0x05);
         assert_eq!(cpu.program_counter, pc + 10);
     }
@@ -1793,9 +1852,16 @@ mod test {
               brk
         );
 
-        program[2] = 0x80;
-
         let mut cpu = CPU::new();
+        cpu.load(&program);
+        cpu.reset();
+
+        // Update program start offset
+        let program_start = cpu.mem_read_16(0xFFFC);
+        let program_jmp = program_start + ((program[2] as u16) << 8 | program[1] as u16);
+        program[1] = program_jmp as u8;
+        program[2] = (program_jmp >> 8) as u8;
+
         cpu.load(&program);
         cpu.reset();
         cpu.program_counter += 1;
@@ -1987,9 +2053,17 @@ mod test {
               lda #0x01
               rts
         );
-        program[2] = 0x80;
 
         let mut cpu = CPU::new();
+        cpu.load(&program);
+        cpu.reset();
+
+        // Update program start offset
+        let program_start = cpu.mem_read_16(0xFFFC);
+        let program_jmp = program_start + ((program[2] as u16) << 8 | program[1] as u16);
+        program[1] = program_jmp as u8;
+        program[2] = (program_jmp >> 8) as u8;
+
         cpu.load_and_run(&program);
 
         assert_eq!(cpu.register_a, 0x01);
@@ -2059,6 +2133,26 @@ mod test {
         assert_eq!(cpu.mem_read(0x1122), 0x69)
     }
     // Store reg test ----------------------------------
+
+    // STA test ----------------------------------------
+    #[test]
+    fn test_0x91_sta_indirect_y() {
+        let program = assemble6502!(
+            lda #0x10
+            sta 0x00
+            lda #0x00
+            sta 0x01
+            ldy #0x00
+            lda #0x69
+            sta (0x00),y
+        );
+
+        let mut cpu = CPU::new();
+        cpu.load_and_run(&program);
+
+        assert_eq!(cpu.mem_read(0x0010), 0x69);
+    }
+    // STA test ----------------------------------------
 
     // TSX test ----------------------------------------
     #[test]
