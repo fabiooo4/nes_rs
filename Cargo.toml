@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 lazy_static = "1.5.0"
+rand = "0.9.1"
+sdl2 = "0.37.0"
 
 [dev-dependencies]
 rustasm6502 = "=0.1.4"

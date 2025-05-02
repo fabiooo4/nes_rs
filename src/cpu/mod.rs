@@ -15,7 +15,7 @@ pub struct CPU {
     memory: [u8; 0xFFFF],
 }
 
-trait Memory {
+pub trait Memory {
     fn mem_read(&self, addr: u16) -> u8;
     fn mem_write(&mut self, addr: u16, data: u8);
 
@@ -75,15 +75,16 @@ impl CPU {
     /// Loads a program into memory at 0x8000
     ///
     /// The starting point of the program is written to 0xFFFC
-    fn load(&mut self, program: &[u8]) {
-        self.memory[0x8000..(0x8000 + program.len())].copy_from_slice(program);
+    pub fn load(&mut self, program: &[u8]) {
+        let program_start = 0x0600;
+        self.memory[program_start..(program_start + program.len())].copy_from_slice(program);
 
         // Write the program start in 0xFFFC
-        self.mem_write_16(0xFFFC, 0x8000);
+        self.mem_write_16(0xFFFC, program_start as u16);
     }
 
     /// Resets the CPU registers and status bits, then loads the program start address from 0xFFFC
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.register_a = 0;
         self.register_x = 0;
         self.status = Status::new();
@@ -92,16 +93,24 @@ impl CPU {
         self.program_counter = self.mem_read_16(0xFFFC);
     }
 
-    /// Runs the CPU until a BRK instruction is encountered
+    pub fn run(&mut self) {
+        self.run_with_callback(|_| {});
+    }
+
+    /// Runs the CPU and a callback before each opcode execution
     ///
     /// # Panics
     /// If an invalid opcode is encountered, the CPU will panic.
-    fn run(&mut self) {
+    pub fn run_with_callback<F: FnMut(&mut CPU)>(&mut self, mut callback: F) {
         loop {
+            callback(self);
+
             let code = self.mem_read(self.program_counter);
             let opcode = opcodes::CPU_OPCODES
                 .get(&code)
                 .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
+
+            println!("OPCODE: {:X?} pc: {:X?}", opcode, self.program_counter);
 
             self.program_counter += 1;
 
@@ -142,7 +151,10 @@ impl CPU {
                 Code::NOP => continue,
                 Code::ORA => self.ora(&opcode.mode),
                 Code::PHA => self.stack_push(self.register_a),
-                Code::PHP => self.stack_push(self.status.as_byte()),
+                Code::PHP => {
+                    self.stack_push(self.status.as_byte());
+                    self.status.brk = true
+                }
                 Code::PLA => self.pla(),
                 Code::PLP => self.plp(),
                 Code::ROL => self.rol(&opcode.mode),
@@ -730,6 +742,7 @@ impl CPU {
     fn plp(&mut self) {
         let stack_value = self.stack_pop();
         self.status.set_from_byte(stack_value);
+        self.status.brk = false;
         self.update_zero_and_negative_flags(stack_value);
     }
 
@@ -812,6 +825,7 @@ impl CPU {
         self.plp(); // Pop cpu status
         let target_addr = self.stack_pop_16();
 
+        self.status.brk = false;
         self.program_counter = target_addr;
     }
 
@@ -886,7 +900,7 @@ impl CPU {
 
     /// Copies the current contents of the accumulator into the Y register and
     /// sets the zero and negative flags as appropriate
-    /// 
+    ///
     /// ## Addressing modes
     /// | Addressing Mode  | Opcode | Bytes | Cycles |
     /// |------------------|--------|-------|--------|
@@ -898,7 +912,7 @@ impl CPU {
 
     /// Copies the current contents of the stack register into the X register
     /// and sets the zero and negative flags as appropriate
-    /// 
+    ///
     /// ## Addressing modes
     /// | Addressing Mode  | Opcode | Bytes | Cycles |
     /// |------------------|--------|-------|--------|
@@ -1788,8 +1802,8 @@ mod test {
         cpu.jsr();
         cpu.run();
         assert_eq!(cpu.register_a, 0x00);
-        assert_eq!(cpu.program_counter, 0x8006);
-        assert_eq!(cpu.stack_pop_16(), 0x8002);
+        assert_eq!(cpu.program_counter, cpu.mem_read_16(0xFFFC) + 0x06);
+        assert_eq!(cpu.stack_pop_16(), cpu.mem_read_16(0xFFFC) + 0x02);
     }
     // JSR test ----------------------------------------
 
@@ -1979,7 +1993,7 @@ mod test {
         cpu.load_and_run(&program);
 
         assert_eq!(cpu.register_a, 0x01);
-        assert_eq!(cpu.program_counter, 0x8004);
+        assert_eq!(cpu.program_counter, cpu.mem_read_16(0xFFFC) + 0x04);
     }
     // RTS test ---------------------------------------------
 
