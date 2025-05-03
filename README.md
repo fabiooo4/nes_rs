@@ -12,7 +12,7 @@ NES architecture.
 ## Features
 
 - [x] CPU emulation
-- [ ] BUS emulation
+- [x] BUS emulation
 - [ ] ROM loading
 - [ ] PPU emulation
 - [ ] Input handling

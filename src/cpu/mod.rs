@@ -1,4 +1,6 @@
+mod bus;
 mod opcodes;
+use bus::Bus;
 use opcodes::{AddressingMode, Code};
 use std::{
     fmt::Debug,
@@ -15,7 +17,7 @@ pub struct CPU {
     status: Status,
     program_counter: u16,
     stack_pointer: u8,
-    memory: [u8; 0xFFFF],
+    bus: Bus,
 }
 
 impl Debug for CPU {
@@ -62,7 +64,10 @@ impl Debug for CPU {
 }
 
 pub trait Memory {
+    /// Reads a byte from memory
     fn mem_read(&self, addr: u16) -> u8;
+
+    /// Writes a byte to memory
     fn mem_write(&mut self, addr: u16, data: u8);
 
     /// Writes a 16-bit value to memory (little endian)
@@ -86,14 +91,20 @@ pub trait Memory {
 }
 
 impl Memory for CPU {
-    /// Reads a byte from memory
     fn mem_read(&self, addr: u16) -> u8 {
-        self.memory[addr as usize]
+        self.bus.mem_read(addr)
     }
 
-    /// Writes a byte to memory
     fn mem_write(&mut self, addr: u16, data: u8) {
-        self.memory[addr as usize] = data;
+        self.bus.mem_write(addr, data)
+    }
+
+    fn mem_read_16(&self, addr: u16) -> u16 {
+        self.bus.mem_read_16(addr)
+    }
+
+    fn mem_write_16(&mut self, addr: u16, data: u16) {
+        self.bus.mem_write_16(addr, data);
     }
 }
 
@@ -107,7 +118,7 @@ impl CPU {
             status: Status::new(),
             program_counter: 0,
             stack_pointer: STACK_RESET,
-            memory: [0; 0xFFFF],
+            bus: Bus::new(),
         }
     }
 
@@ -122,11 +133,14 @@ impl CPU {
     ///
     /// The starting point of the program is written to 0xFFFC
     pub fn load(&mut self, program: &[u8]) {
-        let program_start = 0x0600;
-        self.memory[program_start..(program_start + program.len())].copy_from_slice(program);
+        let program_start = 0x0000;
+        // self.memory[program_start..(program_start + program.len())].copy_from_slice(program);
+        for i in 0..(program.len() as u16) {
+            self.mem_write(program_start + i, program[i as usize]);
+        }
 
         // Write the program start in 0xFFFC
-        self.mem_write_16(0xFFFC, program_start as u16);
+        self.mem_write_16(0xFFFC, program_start);
     }
 
     /// Resets the CPU registers and status bits, then loads the program start address from 0xFFFC
@@ -1091,29 +1105,29 @@ mod test {
     fn test_mem_write() {
         let mut cpu = CPU::new();
         cpu.mem_write(0x1234, 0x69);
-        assert_eq!(cpu.memory[0x1234], 0x69)
+        assert_eq!(cpu.mem_read(0x1234), 0x69)
     }
 
     #[test]
     fn test_mem_write_16() {
         let mut cpu = CPU::new();
         cpu.mem_write_16(0x1234, 0x420);
-        assert_eq!(cpu.memory[0x1234], 0x20);
-        assert_eq!(cpu.memory[0x1235], 0x04)
+        assert_eq!(cpu.mem_read(0x1234), 0x20);
+        assert_eq!(cpu.mem_read(0x1235), 0x04)
     }
 
     #[test]
     fn test_mem_read() {
         let mut cpu = CPU::new();
-        cpu.memory[0x1234] = 0x69;
+        cpu.mem_write(0x1234, 0x69);
         assert_eq!(cpu.mem_read(0x1234), 0x69)
     }
 
     #[test]
     fn test_mem_read_16() {
         let mut cpu = CPU::new();
-        cpu.memory[0x1234] = 0x20;
-        cpu.memory[0x1235] = 0x04;
+        cpu.mem_write(0x1234, 0x20);
+        cpu.mem_write(0x1235, 0x04);
         assert_eq!(cpu.mem_read_16(0x1234), 0x0420);
     }
     // Memory read/write tests ----------------------
