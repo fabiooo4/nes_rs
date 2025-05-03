@@ -1,6 +1,6 @@
 use std::{fs, process::exit, thread::sleep, time::Duration};
 
-use nes_rs::cpu::{CPU, Memory, cartridges::Rom};
+use nes_rs::cpu::{CPU, Memory, cartridge::Rom, trace::log};
 use rand::Rng;
 use sdl2::{
     EventPump,
@@ -113,6 +113,8 @@ fn main() {
     let mut rng = rand::rng();
     let mut screen = [0; 32 * 3 * 32];
     cpu.run_with_callback(move |cpu| {
+        println!("{}", log(cpu));
+
         // This game code assumes the following table:
         //
         // | Address space    | Type      | Description                          |

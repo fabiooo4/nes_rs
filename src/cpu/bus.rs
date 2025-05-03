@@ -1,4 +1,4 @@
-use super::{Memory, cartridges::Rom};
+use super::{Memory, cartridge::Rom};
 
 pub struct Bus {
     cpu_wram: [u8; 2048], // 11 Bits

@@ -1,16 +1,17 @@
 mod bus;
-pub mod cartridges;
+pub mod cartridge;
 mod opcodes;
+pub mod trace;
+
+use std::fmt::Debug;
+
 use bus::Bus;
-use cartridges::Rom;
+use cartridge::Rom;
 use opcodes::{AddressingMode, Code};
-use std::{
-    fmt::Debug,
-    io::{Write, stdin, stdout},
-};
+use trace::monitor;
 
 const STACK: u16 = 0x0100;
-const STACK_RESET: u8 = 0xff;
+const STACK_RESET: u8 = 0xfd;
 
 pub struct CPU {
     register_a: u8,
@@ -24,10 +25,8 @@ pub struct CPU {
 
 impl Debug for CPU {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let code = self.mem_read(self.program_counter);
-        let opcode = opcodes::CPU_OPCODES
-            .get(&code)
-            .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
+        use std::io::{Write, stdin, stdout};
+        writeln!(f, "{}", monitor(self))?;
 
         let mut s = String::new();
         let _ = stdout().flush();
@@ -35,30 +34,8 @@ impl Debug for CPU {
             .read_line(&mut s)
             .expect("Did not enter a correct string");
 
-        writeln!(
-            f,
-            "Next instruction: {:02X?}|{:?}",
-            opcode.code, opcode.mode
-        )?;
-        writeln!(
-            f,
-            "PC:{:04X?} SP:{:02X?} {:08b}",
-            self.program_counter,
-            self.stack_pointer,
-            self.status.as_byte()
-        )?;
-        writeln!(
-            f,
-            "A:{:02X?} X:{:02X?} Y:{:02X?}",
-            self.register_a, self.register_x, self.register_y
-        )?;
-
-        for col in (0x0000_u16..=0x00ff_u16).step_by(0x10) {
-            write!(f, "{:04X}:  ", col)?;
-            for row in 0x0_u8..=0xf_u8 {
-                write!(f, "{:02X} ", self.mem_read(col + row as u16))?;
-            }
-            writeln!(f)?;
+        if s.trim() == "q" {
+            std::process::exit(0);
         }
 
         Ok(())
@@ -165,14 +142,18 @@ impl CPU {
     /// # Panics
     /// If an invalid opcode is encountered, the CPU will panic.
     pub fn run_with_callback<F: FnMut(&mut CPU)>(&mut self, mut callback: F) {
-            #[cfg(all(debug_assertions, not(test)))]
+        #[cfg(all(debug_assertions, not(test)))]
         {
             println!("Running in debug mode (to execute normally use 'cargo run --release'):");
-            println!("Press enter to step to the next instruction");
+            println!("Press enter to step to the next instruction, or 'q' to quit\n\n");
         }
 
         loop {
             callback(self);
+
+            // Step by step debug
+            #[cfg(all(debug_assertions, not(test)))]
+            println!("{:?}", self);
 
             let code = self.mem_read(self.program_counter);
             let opcode = opcodes::CPU_OPCODES
@@ -180,6 +161,7 @@ impl CPU {
                 .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
 
             self.program_counter += 1;
+            let pc_state = self.program_counter;
 
             match opcode.code {
                 Code::ADC => self.adc(&opcode.mode),
@@ -243,9 +225,12 @@ impl CPU {
                 Code::TYA => self.set_register_a(self.register_y),
             }
 
-            // Step run on user input
-            #[cfg(all(debug_assertions, not(test)))]
-            println!("{:?}", self);
+            // Update program counter based on parameter length
+            if self.program_counter == pc_state {
+                self.program_counter = self
+                    .program_counter
+                    .wrapping_add(self.params_num(&opcode.mode) as u16);
+            }
         }
     }
 
@@ -263,12 +248,12 @@ impl CPU {
 
     /// Push a byte to the stack
     fn stack_push(&mut self, value: u8) {
-        if self.stack_pointer.checked_sub(1).is_none() {
+        if self.stack_pointer.checked_sub(1).is_none() || self.stack_pointer > STACK_RESET {
             panic!("Stack overflow")
         }
 
         self.mem_write(STACK + self.stack_pointer as u16, value);
-        self.stack_pointer -= 1;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
     }
 
     // Push a 16 bit value to the stack
@@ -282,11 +267,11 @@ impl CPU {
 
     /// Pop a byte from the stack
     fn stack_pop(&mut self) -> u8 {
-        if self.stack_pointer.checked_add(1).is_none() {
+        if self.stack_pointer + 1 > STACK_RESET {
             panic!("Stack overflow")
         }
         let res = self.mem_read(STACK + self.stack_pointer as u16 + 1);
-        self.stack_pointer += 1;
+        self.stack_pointer = self.stack_pointer.wrapping_add(1);
         res
     }
 
@@ -299,43 +284,36 @@ impl CPU {
     }
 
     /// Gets the address of the operand parameters based on the addressing mode.
-    /// This function also updates the program counter based on the parameter length.
     ///
     /// # Returns
     /// Returns `None` if the mode is implied
-    ///
-    /// # Panics
-    /// If an opcode with `NoneAddressing` mode is encountered, the CPU will panic
-    /// because no parameters are expected.
-    fn get_parameters_address(&mut self, mode: &AddressingMode) -> Option<u16> {
-        let addr = match mode {
-            AddressingMode::Immediate => Some(self.program_counter),
-            AddressingMode::ZeroPage => Some(self.mem_read(self.program_counter) as u16),
+    fn get_parameters_address(&self, mode: &AddressingMode, start_addr: u16) -> Option<u16> {
+        match mode {
+            AddressingMode::Immediate => Some(start_addr),
+            AddressingMode::ZeroPage => Some(self.mem_read(start_addr) as u16),
 
-            AddressingMode::ZeroPage_X => Some(
-                self.mem_read(self.program_counter)
-                    .wrapping_add(self.register_x) as u16,
-            ),
+            AddressingMode::ZeroPage_X => {
+                Some(self.mem_read(start_addr).wrapping_add(self.register_x) as u16)
+            }
 
-            AddressingMode::ZeroPage_Y => Some(
-                self.mem_read(self.program_counter)
-                    .wrapping_add(self.register_y) as u16,
-            ),
+            AddressingMode::ZeroPage_Y => {
+                Some(self.mem_read(start_addr).wrapping_add(self.register_y) as u16)
+            }
 
-            AddressingMode::Absolute => Some(self.mem_read_16(self.program_counter)),
+            AddressingMode::Absolute => Some(self.mem_read_16(start_addr)),
 
             AddressingMode::Absolute_X => Some(
-                self.mem_read_16(self.program_counter)
+                self.mem_read_16(start_addr)
                     .wrapping_add(self.register_x as u16),
             ),
 
             AddressingMode::Absolute_Y => Some(
-                self.mem_read_16(self.program_counter)
+                self.mem_read_16(start_addr)
                     .wrapping_add(self.register_y as u16),
             ),
 
             AddressingMode::Indirect => {
-                let base = self.mem_read(self.program_counter);
+                let base = self.mem_read(start_addr);
                 let low = self.mem_read(base as u16) as u16;
                 let high = self.mem_read(base as u16 + 1) as u16;
 
@@ -345,9 +323,7 @@ impl CPU {
             }
 
             AddressingMode::Indirect_X => {
-                let base = self
-                    .mem_read(self.program_counter)
-                    .wrapping_add(self.register_x);
+                let base = self.mem_read(start_addr).wrapping_add(self.register_x);
                 let low = self.mem_read(base as u16) as u16;
                 let high = self.mem_read(base.wrapping_add(1) as u16) as u16;
 
@@ -355,7 +331,7 @@ impl CPU {
             }
 
             AddressingMode::Indirect_Y => {
-                let base = self.mem_read(self.program_counter);
+                let base = self.mem_read(start_addr);
                 let low = self.mem_read(base as u16) as u16;
                 let high = self.mem_read(base as u16 + 1) as u16;
 
@@ -365,30 +341,26 @@ impl CPU {
             }
 
             AddressingMode::Implied => None,
-        };
+        }
+    }
 
-        // Update program counter based on parameter length
+    /// Returns the number of parameters based on the addressing mode
+    fn params_num(&self, mode: &AddressingMode) -> usize {
         match mode {
             AddressingMode::Immediate
             | AddressingMode::ZeroPage
             | AddressingMode::ZeroPage_X
             | AddressingMode::ZeroPage_Y
             | AddressingMode::Indirect_X
-            | AddressingMode::Indirect_Y => {
-                self.program_counter = self.program_counter.wrapping_add(1)
-            }
+            | AddressingMode::Indirect_Y => 1,
 
             AddressingMode::Absolute
             | AddressingMode::Absolute_X
             | AddressingMode::Absolute_Y
-            | AddressingMode::Indirect => {
-                self.program_counter = self.program_counter.wrapping_add(2)
-            }
+            | AddressingMode::Indirect => 2,
 
-            AddressingMode::Implied => {}
+            AddressingMode::Implied => 0,
         }
-
-        addr
     }
 }
 
@@ -412,7 +384,7 @@ impl CPU {
     /// | (Indirect, X)    | 61     | 2     | 6                          |
     /// | (Indirect), Y    | 71     | 2     | 5 (+1 if page crossed)     |
     fn adc(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
 
         let sum = self.register_a as u16 + value as u16 + self.status.carry as u16;
@@ -440,7 +412,7 @@ impl CPU {
     /// | (Indirect, X)    | 21     | 2     | 6                          |
     /// | (Indirect), Y    | 31     | 2     | 5 (+1 if page crossed)     |
     fn and(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
 
         self.set_register_a(self.register_a & value);
@@ -461,7 +433,7 @@ impl CPU {
     /// | Absolute         | 0E     | 3     | 6                          |
     /// | Absolute, X      | 1E     | 3     | 7                          |
     fn asl(&mut self, mode: &AddressingMode) {
-        let value = match self.get_parameters_address(mode) {
+        let value = match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => self.mem_read(param_addr),
             None => 1, // Implied value
         };
@@ -487,11 +459,14 @@ impl CPU {
     /// | Relative         | 50     | 2     | 2 (+1 branch,+2 new page) |
     /// | Relative         | 70     | 2     | 2 (+1 branch,+2 new page) |
     fn branch(&mut self, condition: bool) {
-        let param_addr = self.get_parameters_address(&AddressingMode::Immediate).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(&AddressingMode::Immediate, self.program_counter).unwrap(/* safe */);
         let value: i8 = self.mem_read(param_addr) as i8;
 
         if condition {
-            self.program_counter = self.program_counter.wrapping_add(value as u16);
+            self.program_counter = self
+                .program_counter
+                .wrapping_add(1)
+                .wrapping_add(value as u16);
         }
     }
 
@@ -506,7 +481,7 @@ impl CPU {
     /// | Zero Page        | 24     | 2     | 3                          |
     /// | Absolute         | 2C     | 3     | 4                          |
     fn bit(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let target = self.mem_read(param_addr);
 
         self.status.zero = self.register_a & target == 0;
@@ -529,7 +504,7 @@ impl CPU {
     /// | (Indirect, X)    | C1          | 2     | 6                          |
     /// | (Indirect), Y    | D1          | 2     | 5 (+1 if page crossed)     |
     fn compare_register(&mut self, reg: u8, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let target = self.mem_read(param_addr);
         let res: i8 = (reg as i8).wrapping_sub(target as i8);
 
@@ -548,7 +523,7 @@ impl CPU {
     /// | Absolute         | CE     | 3     | 6                          |
     /// | Absolute, X      | DE     | 3     | 7                          |
     fn dec(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
         let res = value.wrapping_sub(1);
 
@@ -598,7 +573,7 @@ impl CPU {
     /// | (Indirect, X)    | 41     | 2     | 6                          |
     /// | (Indirect), Y    | 51     | 2     | 5 (+1 if page crossed)     |
     fn eor(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let target = self.mem_read(param_addr);
 
         self.set_register_a(self.register_a ^ target);
@@ -615,7 +590,7 @@ impl CPU {
     /// | Absolute         | EE     | 3     | 6                          |
     /// | Absolute, X      | FE     | 3     | 7                          |
     fn inc(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
         let res = value.wrapping_add(1);
 
@@ -654,7 +629,8 @@ impl CPU {
     /// | Absolute         | 4C     | 3     | 3                          |
     /// | Indirect         | 6C     | 3     | 5                          |
     fn jmp(&mut self, mode: &AddressingMode) {
-        let target_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let target_addr =
+            self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
 
         self.program_counter = target_addr;
     }
@@ -667,8 +643,8 @@ impl CPU {
     /// |------------------|--------|-------|----------------------------|
     /// | Absolute         | 20     | 3     | 6                          |
     fn jsr(&mut self) {
-        let target_addr = self.get_parameters_address(&AddressingMode::Absolute).unwrap(/* safe */);
-        self.stack_push_16(self.program_counter.wrapping_sub(1));
+        let target_addr = self.get_parameters_address(&AddressingMode::Absolute, self.program_counter).unwrap(/* safe */);
+        self.stack_push_16(self.program_counter.wrapping_add(1));
 
         self.program_counter = target_addr;
     }
@@ -688,7 +664,7 @@ impl CPU {
     /// | (Indirect, X)    | A1     | 2     | 6                          |
     /// | (Indirect), Y    | B1     | 2     | 5 (+1 if page crossed)     |
     fn lda(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
 
         self.set_register_a(value);
@@ -706,7 +682,7 @@ impl CPU {
     /// | Absolute         | AE     | 3     | 4                          |
     /// | Absolute, Y      | BE     | 3     | 4 (+1 if page crossed)     |
     fn ldx(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
 
         self.register_x = value;
@@ -725,7 +701,7 @@ impl CPU {
     /// | Absolute         | AC     | 3     | 4                          |
     /// | Absolute, X      | BC     | 3     | 4 (+1 if page crossed)     |
     fn ldy(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
 
         self.register_y = value;
@@ -744,7 +720,7 @@ impl CPU {
     /// | Absolute         | 4E     | 3     | 6                          |
     /// | Absolute, X      | 5E     | 3     | 7                          |
     fn lsr(&mut self, mode: &AddressingMode) {
-        match self.get_parameters_address(mode) {
+        match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => {
                 let mem_value = self.mem_read(param_addr);
 
@@ -779,7 +755,7 @@ impl CPU {
     /// | (Indirect, X)    | 01     | 2     | 6                          |
     /// | (Indirect), Y    | 11     | 2     | 5 (+1 if page crossed)     |
     fn ora(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let target = self.mem_read(param_addr);
 
         self.set_register_a(self.register_a | target);
@@ -824,7 +800,7 @@ impl CPU {
     /// | Absolute         | 2E     | 3     | 6                          |
     /// | Absolute, X      | 3E     | 3     | 7                          |
     fn rol(&mut self, mode: &AddressingMode) {
-        match self.get_parameters_address(mode) {
+        match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => {
                 let value = self.mem_read(param_addr);
 
@@ -858,7 +834,7 @@ impl CPU {
     /// | Absolute         | 6E     | 3     | 6                          |
     /// | Absolute, X      | 7E     | 3     | 7                          |
     fn ror(&mut self, mode: &AddressingMode) {
-        match self.get_parameters_address(mode) {
+        match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => {
                 let value = self.mem_read(param_addr);
 
@@ -922,7 +898,7 @@ impl CPU {
     /// | (Indirect, X)    | E1     | 2     | 6                          |
     /// | (Indirect), Y    | F1     | 2     | 5 (+1 if page crossed)     |
     fn sbc(&mut self, mode: &AddressingMode) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = -(self.mem_read(param_addr) as i8) as u8;
 
         let sum = self.register_a as u16 + value as u16 - (1 - self.status.carry as u16);
@@ -947,7 +923,7 @@ impl CPU {
     /// | (Indirect, X)    | 81         | 2     | 6                          |
     /// | (Indirect), Y    | 91         | 2     | 6                          |
     fn store_reg(&mut self, mode: &AddressingMode, reg: u8) {
-        let param_addr = self.get_parameters_address(mode).unwrap(/* safe */);
+        let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         self.mem_write(param_addr, reg);
     }
 
@@ -1051,7 +1027,7 @@ impl Status {
             overflow: false,
             brk: false,
             decimal: false,
-            interrupt_disable: false,
+            interrupt_disable: true,
             zero: false,
             carry: false,
         }
@@ -1082,7 +1058,7 @@ impl Status {
 #[cfg(test)]
 mod test {
     use super::*;
-    use cartridges::test::test_rom;
+    use cartridge::test::test_rom;
 
     // Assembler test --------------------------------------------------------
     #[test]
@@ -1868,8 +1844,6 @@ mod test {
         program[2] = (program_jmp >> 8) as u8;
 
         cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.program_counter += 1;
-        cpu.jsr();
         cpu.run();
         assert_eq!(cpu.register_a, 0x00);
         assert_eq!(cpu.program_counter, program_start + 0x06);
@@ -1961,7 +1935,7 @@ mod test {
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
 
-        assert_eq!(cpu.stack_pop(), 0b00100011)
+        assert_eq!(cpu.stack_pop(), 0b00110011)
     }
     // PHP test ---------------------------------------------
 
