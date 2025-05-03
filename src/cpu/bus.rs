@@ -1,14 +1,27 @@
-use super::Memory;
+use super::{Memory, cartridges::Rom};
 
 pub struct Bus {
-    cpu_vram: [u8; 2048], // 11 Bits
+    cpu_wram: [u8; 2048], // 11 Bits
+    rom: Rom,
 }
 
 impl Bus {
-    pub fn new() -> Self {
+    pub fn new(rom: Rom) -> Self {
         Bus {
-            cpu_vram: [0; 2048],
+            cpu_wram: [0; 2048],
+            rom,
         }
+    }
+
+    fn read_prg_rom(&self, addr: u16) -> u8 {
+        let mut addr = addr - 0x8000; // Remove mapping
+
+        // Mirror if PRG has only 1 bank of 16kB
+        if self.rom.prg_rom.len() == 0x4000 && addr >= 0x4000 {
+            addr &= 0x4000;
+        }
+
+        self.rom.prg_rom[addr as usize]
     }
 }
 
@@ -21,17 +34,25 @@ const RAM_MIRROR_END: u16 = 0x1FFF;
 const PPU_REG: u16 = 0x2000;
 const PPU_REG_MIRROR_END: u16 = 0x3FFF;
 // PPU --------------------
+// PRG_ROM ----------------
+const PRG_ROM: u16 = 0x8000;
+const PRG_ROM_END: u16 = 0x0ffff;
+// PRG_ROM ----------------
 
 impl Memory for Bus {
     fn mem_read(&self, addr: u16) -> u8 {
         match addr {
             RAM..=RAM_MIRROR_END => {
-                // [0x0000..0x0800]
+                // [0x0000..0x01FFF] -> [0x0000..0x0800]
                 let mirrored_addr = addr & 0x7ff;
-                self.cpu_vram[mirrored_addr as usize]
+                self.cpu_wram[mirrored_addr as usize]
+            }
+            PRG_ROM..=PRG_ROM_END => {
+                // [0x8000..0x10000] -> PRG_ROM
+                self.read_prg_rom(addr)
             }
             PPU_REG..=PPU_REG_MIRROR_END => {
-                // [0x2000..0x2008]
+                // [0x2000..0x3FFF] -> [0x2000..0x2008]
                 let _mirrored_addr = addr & 0x2007;
                 unimplemented!("PPU not yet supported");
             }
@@ -47,7 +68,10 @@ impl Memory for Bus {
             RAM..=RAM_MIRROR_END => {
                 // [0x0000..0x0800]
                 let mirrored_addr = addr & 0x7ff;
-                self.cpu_vram[mirrored_addr as usize] = data
+                self.cpu_wram[mirrored_addr as usize] = data
+            }
+            PRG_ROM..=PRG_ROM_END => {
+                panic!("Attempted to write in cartridge Read Only Memory");
             }
             PPU_REG..=PPU_REG_MIRROR_END => {
                 // [0x2000..0x2008]
