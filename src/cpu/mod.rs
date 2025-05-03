@@ -1,14 +1,14 @@
 mod bus;
 pub mod cartridge;
+pub mod log;
 mod opcodes;
-pub mod trace;
 
 use std::fmt::Debug;
 
 use bus::Bus;
 use cartridge::Rom;
+use log::monitor;
 use opcodes::{AddressingMode, Code};
-use trace::monitor;
 
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xfd;
@@ -18,7 +18,7 @@ pub struct CPU {
     register_x: u8,
     register_y: u8,
     status: Status,
-    program_counter: u16,
+    pub program_counter: u16,
     stack_pointer: u8,
     bus: Bus,
 }
@@ -201,8 +201,9 @@ impl CPU {
                 Code::ORA => self.ora(&opcode.mode),
                 Code::PHA => self.stack_push(self.register_a),
                 Code::PHP => {
+                    self.status.brk = true;
                     self.stack_push(self.status.as_byte());
-                    self.status.brk = true
+                    self.status.brk = false;
                 }
                 Code::PLA => self.pla(),
                 Code::PLP => self.plp(),
@@ -238,6 +239,24 @@ impl CPU {
     fn set_register_a(&mut self, value: u8) {
         self.register_a = value;
         self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    /// Adds to register A while keeping track of wrapping and overflow
+    fn add_to_register_a(&mut self, data: u8) {
+        let sum = self.register_a as u16 + data as u16 + (self.status.carry as u16);
+
+        self.status.carry = sum > 0xff;
+
+        let result = sum as u8;
+
+        self.status.overflow = (data ^ result) & (result ^ self.register_a) & 0x80 != 0;
+
+        self.set_register_a(result);
+    }
+
+    /// Subtracts from register A while keeping track of wrapping and overflow
+    fn sub_from_register_a(&mut self, data: u8) {
+        self.add_to_register_a(((data as i8).wrapping_neg().wrapping_sub(1)) as u8);
     }
 
     /// Updates the zero and negative flags based on the result of an operation
@@ -313,11 +332,16 @@ impl CPU {
             ),
 
             AddressingMode::Indirect => {
-                let base = self.mem_read(start_addr);
-                let low = self.mem_read(base as u16) as u16;
-                let high = self.mem_read(base as u16 + 1) as u16;
+                let base = self.mem_read_16(start_addr);
 
-                let deref_base = high << 8 | low;
+                let deref_base = if base & 0x00FF == 0x00FF {
+                    let low = self.mem_read(base) as u16;
+                    let high = self.mem_read(base & 0xFF00) as u16;
+
+                    high << 8 | low
+                } else {
+                    self.mem_read_16(base)
+                };
 
                 Some(deref_base)
             }
@@ -333,9 +357,9 @@ impl CPU {
             AddressingMode::Indirect_Y => {
                 let base = self.mem_read(start_addr);
                 let low = self.mem_read(base as u16) as u16;
-                let high = self.mem_read(base as u16 + 1) as u16;
+                let high = self.mem_read(base.wrapping_add(1) as u16) as u16;
 
-                let deref_base = high << 8 | low;
+                let deref_base = (high << 8) | low;
 
                 Some(deref_base.wrapping_add(self.register_y as u16))
             }
@@ -387,12 +411,7 @@ impl CPU {
         let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
         let value = self.mem_read(param_addr);
 
-        let sum = self.register_a as u16 + value as u16 + self.status.carry as u16;
-        let result = sum as u8;
-
-        self.status.carry = sum > 0xff;
-        self.status.overflow = (value ^ result) & (result ^ self.register_a) & 0b10000000 != 0;
-        self.set_register_a(result);
+        self.add_to_register_a(value);
     }
 
     /// A logical AND is performed, bit by bit, on the accumulator contents using
@@ -435,13 +454,21 @@ impl CPU {
     fn asl(&mut self, mode: &AddressingMode) {
         let value = match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => self.mem_read(param_addr),
-            None => 1, // Implied value
+            None => self.register_a,
         };
 
-        let res = (self.register_a as u16) << value;
+        let res = (value as u16) << 1;
 
+        self.status.carry = (value >> 7) & 1 == 1;
         self.status.overflow = res > 0xff;
-        self.set_register_a(res as u8);
+
+        match self.get_parameters_address(mode, self.program_counter) {
+            Some(param_addr) => {
+                self.mem_write(param_addr, res as u8);
+                self.update_zero_and_negative_flags(res as u8);
+            }
+            None => self.set_register_a(res as u8),
+        };
     }
 
     /// If the condition is true then add the relative displacement to the
@@ -508,9 +535,8 @@ impl CPU {
         let target = self.mem_read(param_addr);
         let res: i8 = (reg as i8).wrapping_sub(target as i8);
 
-        self.status.carry = res >= 0;
-        self.status.zero = res == 0;
-        self.status.negative = res < 0;
+        self.status.carry = target <= reg;
+        self.update_zero_and_negative_flags(res as u8);
     }
 
     /// Subtracts one from the value held at a specified memory location setting the zero and negative flags as appropriate
@@ -784,7 +810,6 @@ impl CPU {
         let stack_value = self.stack_pop();
         self.status.set_from_byte(stack_value);
         self.status.brk = false;
-        self.update_zero_and_negative_flags(stack_value);
     }
 
     /// Move each of the bits in either A or M one place to the left. Bit 0 is
@@ -834,24 +859,22 @@ impl CPU {
     /// | Absolute         | 6E     | 3     | 6                          |
     /// | Absolute, X      | 7E     | 3     | 7                          |
     fn ror(&mut self, mode: &AddressingMode) {
+        let value = match self.get_parameters_address(mode, self.program_counter) {
+            Some(param_addr) => self.mem_read(param_addr),
+            None => self.register_a,
+        };
+
+        let old_carry = self.status.carry;
+
+        self.status.carry = value & 0x01 == 0x01;
+        let res = (value >> 1) | if old_carry { 0b10000000 } else { 0 };
+
         match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => {
-                let value = self.mem_read(param_addr);
-
-                self.status.carry = value & 0x01 == 0x01;
-                let res = (value >> 1) | (self.status.carry as u8) << 7;
-
                 self.mem_write(param_addr, res);
                 self.update_zero_and_negative_flags(res);
             }
-            None => {
-                let value = self.register_a;
-
-                self.status.carry = value & 0x01 == 0x01;
-                let res = (value >> 1) | (self.status.carry as u8) << 7;
-
-                self.set_register_a(res);
-            }
+            None => self.set_register_a(res),
         };
     }
 
@@ -899,14 +922,9 @@ impl CPU {
     /// | (Indirect), Y    | F1     | 2     | 5 (+1 if page crossed)     |
     fn sbc(&mut self, mode: &AddressingMode) {
         let param_addr = self.get_parameters_address(mode, self.program_counter).unwrap(/* safe */);
-        let value = -(self.mem_read(param_addr) as i8) as u8;
+        let value = self.mem_read(param_addr);
 
-        let sum = self.register_a as u16 + value as u16 - (1 - self.status.carry as u16);
-        let result = sum as u8;
-
-        self.status.carry = sum > 0xff;
-        self.status.overflow = (value ^ result) & (result ^ self.register_a) & 0b10000000 != 0;
-        self.set_register_a(result);
+        self.sub_from_register_a(value);
     }
 
     /// Stores the contents of a register into memory
@@ -1217,6 +1235,24 @@ mod test {
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x08);
+    }
+
+    #[test]
+    fn test_0xb1_lda_indirect_y() {
+        let program = assemble6502!(
+            ldy #0x01
+            lda #0x03
+            sta 0x01
+            lda #0x07
+            sta 0x02
+            ldx #0x0a
+            stx abs 0x0704
+            lda (0x01),y
+        );
+
+        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        cpu.run();
+        assert_eq!(cpu.register_a, 0x0a);
     }
     // LDA test --------------------------------------
 
@@ -1904,7 +1940,7 @@ mod test {
         cpu.status.carry = true;
         cpu.status.brk = true;
 
-        assert_eq!(cpu.status.as_byte(), 0b10110001);
+        assert_eq!(cpu.status.as_byte(), 0b10110101);
     }
 
     #[test]
@@ -1935,7 +1971,7 @@ mod test {
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
 
-        assert_eq!(cpu.stack_pop(), 0b00110011)
+        assert_eq!(cpu.stack_pop(), 0b00110111)
     }
     // PHP test ---------------------------------------------
 
@@ -1981,7 +2017,7 @@ mod test {
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
 
-        assert_eq!(cpu.register_a, 0b10000001);
+        assert_eq!(cpu.register_a, 0b00000001);
         assert!(cpu.status.carry);
     }
 
@@ -1996,7 +2032,7 @@ mod test {
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
 
-        assert_eq!(cpu.register_a, 0b11000000);
+        assert_eq!(cpu.register_a, 0b10000000);
         assert!(cpu.status.carry);
     }
     // ROR test ---------------------------------------------

@@ -13,12 +13,12 @@ impl Bus {
         }
     }
 
-    fn read_prg_rom(&self, addr: u16) -> u8 {
-        let mut addr = addr - 0x8000; // Remove mapping
+    fn read_prg_rom(&self, mut addr: u16) -> u8 {
+        addr -= 0x8000; // Remove mapping
 
         // Mirror if PRG has only 1 bank of 16kB
         if self.rom.prg_rom.len() == 0x4000 && addr >= 0x4000 {
-            addr &= 0x4000;
+            addr %= 0x4000;
         }
 
         self.rom.prg_rom[addr as usize]
@@ -36,7 +36,7 @@ const PPU_REG_MIRROR_END: u16 = 0x3FFF;
 // PPU --------------------
 // PRG_ROM ----------------
 const PRG_ROM: u16 = 0x8000;
-const PRG_ROM_END: u16 = 0x0ffff;
+const PRG_ROM_END: u16 = 0xffff;
 // PRG_ROM ----------------
 
 impl Memory for Bus {

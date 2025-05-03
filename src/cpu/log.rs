@@ -12,11 +12,13 @@ pub fn log(cpu: &CPU) -> String {
         .get(&code)
         .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
 
+    let begin = cpu.program_counter;
+
     // Get the parameters of the opcode
     let mut params: [u8; 2] = [0, 0];
 
     (0..cpu.params_num(&opcode.mode)).for_each(|i| {
-        let param = cpu.mem_read(cpu.program_counter.wrapping_add(i as u16 + 1));
+        let param = cpu.mem_read(begin.wrapping_add(i as u16 + 1));
         params[i] = param
     });
 
@@ -29,11 +31,50 @@ pub fn log(cpu: &CPU) -> String {
         }
     };
 
+    let (mem_addr, stored_value) = match opcode.mode {
+        AddressingMode::Implied => (0, 0),
+        AddressingMode::Immediate => match opcode.code {
+            Code::BCC
+            | Code::BCS
+            | Code::BEQ
+            | Code::BNE
+            | Code::BMI
+            | Code::BPL
+            | Code::BVC
+            | Code::BVS => {
+                let addr = cpu.get_parameters_address(&opcode.mode, begin + 1).unwrap();
+                (addr, cpu.mem_read(addr))
+            }
+            _ => (0, 0),
+        },
+        _ => {
+            let addr = cpu.get_parameters_address(&opcode.mode, begin + 1).unwrap();
+            (addr, cpu.mem_read(addr))
+        }
+    };
+
     let asm = format!(
         "{:?}{}",
         opcode.code,
         match opcode.mode {
-            AddressingMode::Immediate => format!(" #${:02X}", params[0]),
+            AddressingMode::Immediate => {
+                match opcode.code {
+                    Code::BCC
+                    | Code::BCS
+                    | Code::BEQ
+                    | Code::BNE
+                    | Code::BMI
+                    | Code::BPL
+                    | Code::BVC
+                    | Code::BVS => {
+                        format!(
+                            " ${:04X}",
+                            mem_addr.wrapping_add(stored_value as u16).wrapping_add(1)
+                        )
+                    }
+                    _ => format!(" #${:02X}", params[0]),
+                }
+            }
             AddressingMode::ZeroPage => format!(" ${:02X}", params[0]),
             AddressingMode::ZeroPage_X => format!(" ${:02X},X", params[0]),
             AddressingMode::ZeroPage_Y => format!(" ${:02X},Y", params[0]),
@@ -47,16 +88,6 @@ pub fn log(cpu: &CPU) -> String {
         }
     );
 
-    let (mem_addr, stored_value) = match opcode.mode {
-        AddressingMode::Immediate | AddressingMode::Implied => (0, 0),
-        _ => {
-            let addr = cpu
-                .get_parameters_address(&opcode.mode, cpu.program_counter + 1)
-                .unwrap();
-            (addr, cpu.mem_read(addr))
-        }
-    };
-
     let addr_values = match opcode.mode {
         AddressingMode::Implied => match opcode.code {
             Code::ASL | Code::LSR | Code::ROL | Code::ROR => String::from("A"),
@@ -69,6 +100,8 @@ pub fn log(cpu: &CPU) -> String {
         AddressingMode::ZeroPage_X | AddressingMode::ZeroPage_Y => {
             format!("@ {:02X} = {:02X}", mem_addr, stored_value)
         }
+        AddressingMode::Indirect => format!("= {:04X}", mem_addr),
+
         AddressingMode::Indirect_X => {
             format!(
                 "@ {:02X} = {:04X} = {:02X}",
@@ -80,15 +113,18 @@ pub fn log(cpu: &CPU) -> String {
         AddressingMode::Indirect_Y => {
             format!(
                 "= {:04X} @ {:04X} = {:02X}",
-                mem_addr.wrapping_add(cpu.register_y as u16),
+                mem_addr.wrapping_sub(cpu.register_y as u16),
                 mem_addr,
-                stored_value
+                stored_value,
             )
         }
         AddressingMode::Absolute_X | AddressingMode::Absolute_Y => {
             format!("@ {:04X} = {:02X}", mem_addr, stored_value)
         }
-        AddressingMode::Absolute | AddressingMode::Indirect => format!("= {:02X}", stored_value),
+        AddressingMode::Absolute => match opcode.code {
+            Code::JMP | Code::JSR => String::default(),
+            _ => format!("= {:02X}", stored_value),
+        },
     };
     let asm = format!("{} {}", asm, addr_values);
 
@@ -102,8 +138,8 @@ pub fn log(cpu: &CPU) -> String {
     );
 
     let log = format!(
-        "{:04X}  {:X} {:5}  {:30}  {}",
-        cpu.program_counter, code, hex_dump, asm, cpu_state
+        "{:04X}  {:02X} {:5}  {:30}  {}",
+        begin, code, hex_dump, asm, cpu_state
     );
 
     log
@@ -134,9 +170,10 @@ pub fn monitor(cpu: &CPU) -> String {
     );
 
     let cpu_state = format!(
-        "PC:{:04X?} SP:{:02X?} {:08b}",
+        "PC:{:04X?} SP:{:02X?} P:{:08b}|{:02X}",
         cpu.program_counter,
         cpu.stack_pointer,
+        cpu.status.as_byte(),
         cpu.status.as_byte()
     );
     let cpu_regs = format!(
@@ -145,7 +182,7 @@ pub fn monitor(cpu: &CPU) -> String {
     );
 
     let mut memory_banks = String::default();
-    for col in (0x0000_u16..=0x00ff_u16).step_by(0x10) {
+    for col in (0x0000_u16..=0x0100_u16).step_by(0x10) {
         memory_banks.push_str(&format!("{:04X}: ", col));
         for row in 0x0_u8..=0xf_u8 {
             memory_banks.push_str(&format!("{:02X} ", cpu.mem_read(col + row as u16)));
