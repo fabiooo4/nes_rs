@@ -199,15 +199,21 @@ impl CPU {
                     Code::LDA => self.lda(&opcode.mode),
                     Code::LDX => self.ldx(&opcode.mode),
                     Code::LDY => self.ldy(&opcode.mode),
-                    Code::LSR => self.lsr(&opcode.mode),
+                    Code::LSR => {
+                        self.lsr(&opcode.mode);
+                    }
                     Code::NOP => continue,
                     Code::ORA => self.ora(&opcode.mode),
                     Code::PHA => self.stack_push(self.register_a),
                     Code::PHP => self.php(),
                     Code::PLA => self.pla(),
                     Code::PLP => self.plp(),
-                    Code::ROL => self.rol(&opcode.mode),
-                    Code::ROR => self.ror(&opcode.mode),
+                    Code::ROL => {
+                        self.rol(&opcode.mode);
+                    }
+                    Code::ROR => {
+                        self.ror(&opcode.mode);
+                    }
                     Code::RTI => self.rti(),
                     Code::RTS => self.rts(),
                     Code::SBC => self.sbc(&opcode.mode),
@@ -233,6 +239,9 @@ impl CPU {
                     Code::DCP => self.dcp(&opcode.mode),
                     Code::ISB => self.isb(&opcode.mode),
                     Code::SLO => self.slo(&opcode.mode),
+                    Code::RLA => self.rla(&opcode.mode),
+                    Code::SRE => self.sre(&opcode.mode),
+                    Code::RRA => self.rra(&opcode.mode),
                     _ => unreachable!(),
                 },
             }
@@ -757,25 +766,25 @@ impl CPU {
     /// | Zero Page, X     | 56     | 2     | 6                          |
     /// | Absolute         | 4E     | 3     | 6                          |
     /// | Absolute, X      | 5E     | 3     | 7                          |
-    fn lsr(&mut self, mode: &AddressingMode) {
+    fn lsr(&mut self, mode: &AddressingMode) -> u8 {
+        let value = match self.get_parameters_address(mode, self.program_counter) {
+            Some(param_addr) => self.mem_read(param_addr),
+            None => self.register_a,
+        };
+
+        let res = (value as u16) >> 1;
+
+        self.status.carry = value & 1 == 1;
+
         match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => {
-                let mem_value = self.mem_read(param_addr);
-
-                self.status.carry = mem_value & 0x01 == 0x01;
-
-                let res = mem_value >> 1;
-                self.mem_write(param_addr, res);
-
-                self.update_zero_and_negative_flags(res);
+                self.mem_write(param_addr, res as u8);
+                self.update_zero_and_negative_flags(res as u8);
             }
-            None => {
-                self.status.carry = self.register_a & 0x01 == 0x01;
+            None => self.set_register_a(res as u8),
+        };
 
-                self.register_a >>= 1;
-                self.update_zero_and_negative_flags(self.register_a);
-            }
-        }
+        res as u8
     }
 
     /// An inclusive OR is performed, bit by bit, on the accumulator contents
@@ -848,26 +857,26 @@ impl CPU {
     /// | Zero Page, X     | 36     | 2     | 6                          |
     /// | Absolute         | 2E     | 3     | 6                          |
     /// | Absolute, X      | 3E     | 3     | 7                          |
-    fn rol(&mut self, mode: &AddressingMode) {
+    fn rol(&mut self, mode: &AddressingMode) -> u8 {
+        let value = match self.get_parameters_address(mode, self.program_counter) {
+            Some(param_addr) => self.mem_read(param_addr),
+            None => self.register_a,
+        };
+
+        let old_carry = self.status.carry;
+
+        self.status.carry = value >> 7 == 1;
+        let res = (value << 1) | if old_carry { 0b00000001 } else { 0 };
+
         match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => {
-                let value = self.mem_read(param_addr);
-
-                self.status.carry = value & 0b10000000 == 0b10000000;
-                let res = (value << 1) + self.status.carry as u8;
-
                 self.mem_write(param_addr, res);
                 self.update_zero_and_negative_flags(res);
             }
-            None => {
-                let value = self.register_a;
-
-                self.status.carry = value & 0b10000000 == 0b10000000;
-                let res = (value << 1) + self.status.carry as u8;
-
-                self.set_register_a(res);
-            }
+            None => self.set_register_a(res),
         };
+
+        res
     }
 
     /// Move each of the bits in either A or M one place to the right. Bit 7 is
@@ -882,7 +891,7 @@ impl CPU {
     /// | Zero Page, X     | 76     | 2     | 6                          |
     /// | Absolute         | 6E     | 3     | 6                          |
     /// | Absolute, X      | 7E     | 3     | 7                          |
-    fn ror(&mut self, mode: &AddressingMode) {
+    fn ror(&mut self, mode: &AddressingMode) -> u8 {
         let value = match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => self.mem_read(param_addr),
             None => self.register_a,
@@ -900,6 +909,8 @@ impl CPU {
             }
             None => self.set_register_a(res),
         };
+
+        res
     }
 
     /// The RTI instruction is used at the end of an interrupt processing routine.
@@ -1131,6 +1142,57 @@ impl CPU {
     fn slo(&mut self, mode: &AddressingMode) {
         let data = self.asl(mode);
         self.set_register_a(data | self.register_a);
+    }
+
+    /// Rotate one bit left in memory, then AND accumulator with memory
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | 27     | 2     | 5                          |
+    /// | Zero Page, X     | 37     | 2     | 6                          |
+    /// | Absolute         | 2F     | 3     | 6                          |
+    /// | Absolute, X      | 3F     | 3     | 7                          |
+    /// | Absolute, Y      | 3B     | 3     | 7                          |
+    /// | Indirect, X      | 23     | 2     | 8                          |
+    /// | Indirect, Y      | 33     | 2     | 8                          |
+    fn rla(&mut self, mode: &AddressingMode) {
+        let data = self.rol(mode);
+        self.set_register_a(data & self.register_a);
+    }
+
+    /// Shift right one bit in memory, then EOR accumulator with memory
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | 47     | 2     | 5                          |
+    /// | Zero Page, X     | 57     | 2     | 6                          |
+    /// | Absolute         | 4F     | 3     | 6                          |
+    /// | Absolute, X      | 5F     | 3     | 7                          |
+    /// | Absolute, Y      | 5B     | 3     | 7                          |
+    /// | Indirect, X      | 43     | 2     | 8                          |
+    /// | Indirect, Y      | 53     | 2     | 8                          |
+    fn sre(&mut self, mode: &AddressingMode) {
+        let data = self.lsr(mode);
+        self.set_register_a(data ^ self.register_a);
+    }
+
+    /// Rotate one bit right in memory, then ADC accumulator with memory
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | 67     | 2     | 5                          |
+    /// | Zero Page, X     | 77     | 2     | 6                          |
+    /// | Absolute         | 6F     | 3     | 6                          |
+    /// | Absolute, X      | 7F     | 3     | 7                          |
+    /// | Absolute, Y      | 7B     | 3     | 7                          |
+    /// | Indirect, X      | 63     | 2     | 8                          |
+    /// | Indirect, Y      | 73     | 2     | 8                          |
+    fn rra(&mut self, mode: &AddressingMode) {
+        let data = self.ror(mode);
+        self.add_to_register_a(data);
     }
     // Undocumented opcodes ----------------------------------------------------
 }
@@ -2137,7 +2199,7 @@ mod test {
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
 
-        assert_eq!(cpu.register_a, 0b10000001);
+        assert_eq!(cpu.register_a, 0b10000000);
         assert!(cpu.status.carry);
     }
 
@@ -2152,7 +2214,7 @@ mod test {
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
 
-        assert_eq!(cpu.register_a, 0b00000011);
+        assert_eq!(cpu.register_a, 0b00000001);
         assert!(cpu.status.carry);
     }
     // ROL test ---------------------------------------------

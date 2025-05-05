@@ -348,6 +348,36 @@ lazy_static! {
         (0x03, Opcode::new(Code::SLO, AddressingMode::Indirect_X, true)),
         (0x13, Opcode::new(Code::SLO, AddressingMode::Indirect_Y, true)),
         // Mem << 1, A | Mem ---------------------------------------
+
+        // ROL Mem, A & Mem ---------------------------------------
+        (0x27, Opcode::new(Code::RLA, AddressingMode::ZeroPage, true)),
+        (0x37, Opcode::new(Code::RLA, AddressingMode::ZeroPage_X, true)),
+        (0x2F, Opcode::new(Code::RLA, AddressingMode::Absolute, true)),
+        (0x3F, Opcode::new(Code::RLA, AddressingMode::Absolute_X, true)),
+        (0x3B, Opcode::new(Code::RLA, AddressingMode::Absolute_Y, true)),
+        (0x23, Opcode::new(Code::RLA, AddressingMode::Indirect_X, true)),
+        (0x33, Opcode::new(Code::RLA, AddressingMode::Indirect_Y, true)),
+        // ROL Mem, A & Mem ---------------------------------------
+
+        // Mem >> 1, A ^ Mem --------------------------------------
+        (0x47, Opcode::new(Code::SRE, AddressingMode::ZeroPage, true)),
+        (0x57, Opcode::new(Code::SRE, AddressingMode::ZeroPage_X, true)),
+        (0x4F, Opcode::new(Code::SRE, AddressingMode::Absolute, true)),
+        (0x5F, Opcode::new(Code::SRE, AddressingMode::Absolute_X, true)),
+        (0x5B, Opcode::new(Code::SRE, AddressingMode::Absolute_Y, true)),
+        (0x43, Opcode::new(Code::SRE, AddressingMode::Indirect_X, true)),
+        (0x53, Opcode::new(Code::SRE, AddressingMode::Indirect_Y, true)),
+        // Mem >> 1, A ^ Mem --------------------------------------
+
+        // ROR Mem, A + Mem ---------------------------------------
+        (0x67, Opcode::new(Code::RRA, AddressingMode::ZeroPage, true)),
+        (0x77, Opcode::new(Code::RRA, AddressingMode::ZeroPage_X, true)),
+        (0x6F, Opcode::new(Code::RRA, AddressingMode::Absolute, true)),
+        (0x7F, Opcode::new(Code::RRA, AddressingMode::Absolute_X, true)),
+        (0x7B, Opcode::new(Code::RRA, AddressingMode::Absolute_Y, true)),
+        (0x63, Opcode::new(Code::RRA, AddressingMode::Indirect_X, true)),
+        (0x73, Opcode::new(Code::RRA, AddressingMode::Indirect_Y, true)),
+        // ROR Mem, A + Mem ---------------------------------------
         // Illegal opcodes ========================================
     ]);
 }
@@ -447,4 +477,7 @@ pub enum Code {
     DCP,
     ISB,
     SLO,
+    RLA,
+    SRE,
+    RRA,
 }
