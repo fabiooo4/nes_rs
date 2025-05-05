@@ -51,3 +51,4 @@ cargo run
 - [6502 Instruction Reference](http://www.6502.org/tutorials/6502opcodes.html)
 - [Obelisk 6502 Guide](https://www.nesdev.org/obelisk-6502-guide/) - General 6502 guide
 - [The NES Dev Wiki](https://www.nesdev.org/wiki/Nesdev_Wiki)
+- [NES Dev Undocupented Opcodes](https://www.nesdev.org/undocumented_opcodes.txt)

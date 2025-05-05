@@ -158,72 +158,83 @@ impl CPU {
             let code = self.mem_read(self.program_counter);
             let opcode = opcodes::CPU_OPCODES
                 .get(&code)
-                .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
+                .unwrap_or_else(|| panic!("Invalid opcode: {:02X}", code));
 
             self.program_counter += 1;
             let pc_state = self.program_counter;
 
-            match opcode.code {
-                Code::ADC => self.adc(&opcode.mode),
-                Code::AND => self.and(&opcode.mode),
-                Code::ASL => self.asl(&opcode.mode),
-                Code::BCC => self.branch(!self.status.carry),
-                Code::BCS => self.branch(self.status.carry),
-                Code::BEQ => self.branch(self.status.zero),
-                Code::BIT => self.bit(&opcode.mode),
-                Code::BMI => self.branch(self.status.negative),
-                Code::BNE => self.branch(!self.status.zero),
-                Code::BPL => self.branch(!self.status.negative),
-                Code::BRK => return,
-                Code::BVC => self.branch(!self.status.overflow),
-                Code::BVS => self.branch(self.status.overflow),
-                Code::CLC => self.status.carry = false,
-                Code::CLD => self.status.decimal = false,
-                Code::CLI => self.status.interrupt_disable = false,
-                Code::CLV => self.status.overflow = false,
-                Code::CMP => self.compare_register(self.register_a, &opcode.mode),
-                Code::CPX => self.compare_register(self.register_x, &opcode.mode),
-                Code::CPY => self.compare_register(self.register_y, &opcode.mode),
-                Code::DEC => self.dec(&opcode.mode),
-                Code::DEX => self.dex(),
-                Code::DEY => self.dey(),
-                Code::EOR => self.eor(&opcode.mode),
-                Code::INC => self.inc(&opcode.mode),
-                Code::INX => self.inx(),
-                Code::INY => self.iny(),
-                Code::JMP => self.jmp(&opcode.mode),
-                Code::JSR => self.jsr(),
-                Code::LDA => self.lda(&opcode.mode),
-                Code::LDX => self.ldx(&opcode.mode),
-                Code::LDY => self.ldy(&opcode.mode),
-                Code::LSR => self.lsr(&opcode.mode),
-                Code::NOP => continue,
-                Code::ORA => self.ora(&opcode.mode),
-                Code::PHA => self.stack_push(self.register_a),
-                Code::PHP => {
-                    self.status.brk = true;
-                    self.stack_push(self.status.as_byte());
-                    self.status.brk = false;
-                }
-                Code::PLA => self.pla(),
-                Code::PLP => self.plp(),
-                Code::ROL => self.rol(&opcode.mode),
-                Code::ROR => self.ror(&opcode.mode),
-                Code::RTI => self.rti(),
-                Code::RTS => self.rts(),
-                Code::SBC => self.sbc(&opcode.mode),
-                Code::SEC => self.status.carry = true,
-                Code::SED => self.status.decimal = true,
-                Code::SEI => self.status.interrupt_disable = true,
-                Code::STA => self.store_reg(&opcode.mode, self.register_a),
-                Code::STX => self.store_reg(&opcode.mode, self.register_x),
-                Code::STY => self.store_reg(&opcode.mode, self.register_y),
-                Code::TAX => self.tax(),
-                Code::TAY => self.tay(),
-                Code::TSX => self.tsx(),
-                Code::TXA => self.set_register_a(self.register_x),
-                Code::TXS => self.stack_pointer = self.register_x,
-                Code::TYA => self.set_register_a(self.register_y),
+            match opcode.undocumented {
+                false => match opcode.code {
+                    Code::ADC => self.adc(&opcode.mode),
+                    Code::AND => self.and(&opcode.mode),
+                    Code::ASL => {
+                        self.asl(&opcode.mode);
+                    }
+                    Code::BCC => self.branch(!self.status.carry),
+                    Code::BCS => self.branch(self.status.carry),
+                    Code::BEQ => self.branch(self.status.zero),
+                    Code::BIT => self.bit(&opcode.mode),
+                    Code::BMI => self.branch(self.status.negative),
+                    Code::BNE => self.branch(!self.status.zero),
+                    Code::BPL => self.branch(!self.status.negative),
+                    Code::BRK => return,
+                    Code::BVC => self.branch(!self.status.overflow),
+                    Code::BVS => self.branch(self.status.overflow),
+                    Code::CLC => self.status.carry = false,
+                    Code::CLD => self.status.decimal = false,
+                    Code::CLI => self.status.interrupt_disable = false,
+                    Code::CLV => self.status.overflow = false,
+                    Code::CMP => self.compare_register(self.register_a, &opcode.mode),
+                    Code::CPX => self.compare_register(self.register_x, &opcode.mode),
+                    Code::CPY => self.compare_register(self.register_y, &opcode.mode),
+                    Code::DEC => self.dec(&opcode.mode),
+                    Code::DEX => self.dex(),
+                    Code::DEY => self.dey(),
+                    Code::EOR => self.eor(&opcode.mode),
+                    Code::INC => self.inc(&opcode.mode),
+                    Code::INX => self.inx(),
+                    Code::INY => self.iny(),
+                    Code::JMP => self.jmp(&opcode.mode),
+                    Code::JSR => self.jsr(),
+                    Code::LDA => self.lda(&opcode.mode),
+                    Code::LDX => self.ldx(&opcode.mode),
+                    Code::LDY => self.ldy(&opcode.mode),
+                    Code::LSR => self.lsr(&opcode.mode),
+                    Code::NOP => continue,
+                    Code::ORA => self.ora(&opcode.mode),
+                    Code::PHA => self.stack_push(self.register_a),
+                    Code::PHP => self.php(),
+                    Code::PLA => self.pla(),
+                    Code::PLP => self.plp(),
+                    Code::ROL => self.rol(&opcode.mode),
+                    Code::ROR => self.ror(&opcode.mode),
+                    Code::RTI => self.rti(),
+                    Code::RTS => self.rts(),
+                    Code::SBC => self.sbc(&opcode.mode),
+                    Code::SEC => self.status.carry = true,
+                    Code::SED => self.status.decimal = true,
+                    Code::SEI => self.status.interrupt_disable = true,
+                    Code::STA => self.store_reg(&opcode.mode, self.register_a),
+                    Code::STX => self.store_reg(&opcode.mode, self.register_x),
+                    Code::STY => self.store_reg(&opcode.mode, self.register_y),
+                    Code::TAX => self.tax(),
+                    Code::TAY => self.tay(),
+                    Code::TSX => self.tsx(),
+                    Code::TXA => self.set_register_a(self.register_x),
+                    Code::TXS => self.stack_pointer = self.register_x,
+                    Code::TYA => self.set_register_a(self.register_y),
+                    _ => unreachable!(),
+                },
+                true => match opcode.code {
+                    Code::NOP => self.dop(&opcode.mode),
+                    Code::LAX => self.lax(&opcode.mode),
+                    Code::SAX => self.store_reg(&opcode.mode, self.register_x & self.register_a),
+                    Code::SBC => self.sbc(&opcode.mode),
+                    Code::DCP => self.dcp(&opcode.mode),
+                    Code::ISB => self.isb(&opcode.mode),
+                    Code::SLO => self.slo(&opcode.mode),
+                    _ => unreachable!(),
+                },
             }
 
             // Update program counter based on parameter length
@@ -451,7 +462,7 @@ impl CPU {
     /// | Zero Page, X     | 16     | 2     | 6                          |
     /// | Absolute         | 0E     | 3     | 6                          |
     /// | Absolute, X      | 1E     | 3     | 7                          |
-    fn asl(&mut self, mode: &AddressingMode) {
+    fn asl(&mut self, mode: &AddressingMode) -> u8 {
         let value = match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => self.mem_read(param_addr),
             None => self.register_a,
@@ -460,7 +471,6 @@ impl CPU {
         let res = (value as u16) << 1;
 
         self.status.carry = (value >> 7) & 1 == 1;
-        self.status.overflow = res > 0xff;
 
         match self.get_parameters_address(mode, self.program_counter) {
             Some(param_addr) => {
@@ -469,6 +479,8 @@ impl CPU {
             }
             None => self.set_register_a(res as u8),
         };
+
+        res as u8
     }
 
     /// If the condition is true then add the relative displacement to the
@@ -787,6 +799,18 @@ impl CPU {
         self.set_register_a(self.register_a | target);
     }
 
+    /// Pushes a copy of the status flags on to the stack
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles |
+    /// |------------------|--------|-------|--------|
+    /// | Implied          | 08     | 1     | 3      |
+    fn php(&mut self) {
+        self.status.brk = true;
+        self.stack_push(self.status.as_byte());
+        self.status.brk = false;
+    }
+
     /// Pulls an 8 bit value from the stack and into the accumulator. The zero
     /// and negative flags are set as appropriate
     ///
@@ -980,6 +1004,135 @@ impl CPU {
         self.register_x = self.stack_pointer;
         self.update_zero_and_negative_flags(self.register_x);
     }
+
+    // Undocumented opcodes ----------------------------------------------------
+
+    /// No operation (double NOP). The argument has no signifi-cance
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Immediate        | 80     | 2     | 2                          |
+    /// | Immediate        | 82     | 2     | 2                          |
+    /// | Immediate        | 89     | 2     | 2                          |
+    /// | Immediate        | C2     | 2     | 2                          |
+    /// | Immediate        | E2     | 2     | 2                          |
+    /// | Zero Page        | 04     | 2     | 3                          |
+    /// | Zero Page        | 44     | 2     | 3                          |
+    /// | Zero Page        | 64     | 2     | 3                          |
+    /// | Zero Page, X     | 14     | 2     | 4                          |
+    /// | Zero Page, X     | 34     | 2     | 4                          |
+    /// | Zero Page, X     | 54     | 2     | 4                          |
+    /// | Zero Page, X     | 74     | 2     | 4                          |
+    /// | Zero Page, X     | D4     | 2     | 4                          |
+    /// | Zero Page, X     | F4     | 2     | 4                          |
+    /// | Absolute         | 0C     | 3     | 4                          |
+    /// | Absolute, X      | 1C     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, X      | 3C     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, X      | 5C     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, X      | 7C     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, X      | DC     | 3     | 4 (+1 if page crossed)     |
+    /// | Absolute, X      | FC     | 3     | 4 (+1 if page crossed)     |
+    /// | Implied          | 1A     | 1     | 2                          |
+    /// | Implied          | 3A     | 1     | 2                          |
+    /// | Implied          | 5A     | 1     | 2                          |
+    /// | Implied          | 7A     | 1     | 2                          |
+    /// | Implied          | DA     | 1     | 2                          |
+    /// | Implied          | FA     | 1     | 2                          |
+    fn dop(&mut self, mode: &AddressingMode) {
+        if let Some(param_addr) = self.get_parameters_address(mode, self.program_counter) {
+            self.mem_read(param_addr);
+        }
+    }
+
+    /// Load accumulator and X register with memory and sets the zero and negative
+    /// flags appropriately
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | 64     | 2     | 3                          |
+    /// | Zero Page, Y     | 14     | 2     | 4                          |
+    /// | Absolute         | 0C     | 3     | 4                          |
+    /// | Absolute, Y      | FC     | 3     | 4 (+1 if page crossed)     |
+    /// | Indirect, X      | C2     | 2     | 6                          |
+    /// | Indirect, Y      | E2     | 2     | 5 (+1 if page crossed)     |
+    fn lax(&mut self, mode: &AddressingMode) {
+        let param_addr = self
+            .get_parameters_address(mode, self.program_counter)
+            .unwrap();
+        let data = self.mem_read(param_addr);
+
+        self.register_a = data;
+        self.register_x = data;
+        self.update_zero_and_negative_flags(data);
+    }
+
+    /// Subtract 1 from memory (without borrow)
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | C7     | 2     | 5                          |
+    /// | Zero Page, X     | D7     | 2     | 6                          |
+    /// | Absolute         | CF     | 3     | 6                          |
+    /// | Absolute, X      | DF     | 3     | 7                          |
+    /// | Absolute, Y      | DB     | 3     | 7                          |
+    /// | Indirect, X      | C3     | 2     | 8                          |
+    /// | Indirect, Y      | D3     | 2     | 8                          |
+    fn dcp(&mut self, mode: &AddressingMode) {
+        let param_addr = self
+            .get_parameters_address(mode, self.program_counter)
+            .unwrap();
+        let mut data = self.mem_read(param_addr);
+        data = data.wrapping_sub(1);
+        self.mem_write(param_addr, data);
+        self.status.carry = data <= self.register_a;
+
+        self.update_zero_and_negative_flags(self.register_a.wrapping_sub(data));
+    }
+
+    /// Increase memory by one, then subtract memory from accu-mulator (with borrow)
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | E7     | 2     | 5                          |
+    /// | Zero Page, X     | F7     | 2     | 6                          |
+    /// | Absolute         | EF     | 3     | 6                          |
+    /// | Absolute, X      | FF     | 3     | 7                          |
+    /// | Absolute, Y      | FB     | 3     | 7                          |
+    /// | Indirect, X      | E3     | 2     | 8                          |
+    /// | Indirect, Y      | F3     | 2     | 8                          |
+    fn isb(&mut self, mode: &AddressingMode) {
+        let param_addr = self
+            .get_parameters_address(mode, self.program_counter)
+            .unwrap();
+        let mut data = self.mem_read(param_addr);
+
+        data = data.wrapping_add(1);
+        self.mem_write(param_addr, data);
+
+        self.sub_from_register_a(data);
+    }
+
+    /// Shift left one bit in memory, then OR accumulator with memory
+    ///
+    /// ## Addressing modes
+    /// | Addressing Mode  | Opcode | Bytes | Cycles                     |
+    /// |------------------|--------|-------|----------------------------|
+    /// | Zero Page        | 07     | 2     | 5                          |
+    /// | Zero Page, X     | 17     | 2     | 6                          |
+    /// | Absolute         | 0F     | 3     | 6                          |
+    /// | Absolute, X      | 1F     | 3     | 7                          |
+    /// | Absolute, Y      | 1B     | 3     | 7                          |
+    /// | Indirect, X      | 03     | 2     | 8                          |
+    /// | Indirect, Y      | 13     | 2     | 8                          |
+    fn slo(&mut self, mode: &AddressingMode) {
+        let data = self.asl(mode);
+        self.set_register_a(data | self.register_a);
+    }
+    // Undocumented opcodes ----------------------------------------------------
 }
 
 /// ```text
@@ -1675,8 +1828,6 @@ mod test {
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x0);
-
-        assert!(cpu.status.overflow)
     }
     // ASL test ----------------------------------------
 

@@ -10,7 +10,7 @@ pub fn log(cpu: &CPU) -> String {
     let code = cpu.mem_read(cpu.program_counter);
     let opcode = opcodes::CPU_OPCODES
         .get(&code)
-        .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
+        .unwrap_or_else(|| panic!("Invalid opcode: {:02X}", code));
 
     let begin = cpu.program_counter;
 
@@ -69,7 +69,7 @@ pub fn log(cpu: &CPU) -> String {
                     | Code::BVS => {
                         format!(
                             " ${:04X}",
-                            mem_addr.wrapping_add(stored_value as u16).wrapping_add(1)
+                            mem_addr.wrapping_add((stored_value as i8) as u16).wrapping_add(1)
                         )
                     }
                     _ => format!(" #${:02X}", params[0]),
@@ -126,7 +126,8 @@ pub fn log(cpu: &CPU) -> String {
             _ => format!("= {:02X}", stored_value),
         },
     };
-    let asm = format!("{} {}", asm, addr_values);
+    let asm = format!("{} {}",
+        asm, addr_values);
 
     let cpu_state = format!(
         "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
@@ -138,8 +139,13 @@ pub fn log(cpu: &CPU) -> String {
     );
 
     let log = format!(
-        "{:04X}  {:02X} {:5}  {:30}  {}",
-        begin, code, hex_dump, asm, cpu_state
+        "{:04X}  {:02X} {:5} {}{:30}  {}",
+        begin,
+        code,
+        hex_dump,
+        if opcode.undocumented { '*' } else { ' ' },
+        asm,
+        cpu_state
     );
 
     log
@@ -153,7 +159,7 @@ pub fn monitor(cpu: &CPU) -> String {
     let code = cpu.mem_read(cpu.program_counter);
     let opcode = opcodes::CPU_OPCODES
         .get(&code)
-        .unwrap_or_else(|| panic!("Invalid opcode: {:X}", code));
+        .unwrap_or_else(|| panic!("Invalid opcode: {:02X}", code));
 
     // Get the parameters of the opcode
     let mut params: [String; 2] = [String::from("  "), String::from("  ")];
