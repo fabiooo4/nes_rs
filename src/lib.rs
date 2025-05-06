@@ -4,3 +4,9 @@
 extern crate rustasm6502;
 
 pub mod cpu;
+pub mod ppu;
+
+pub trait BitFlags {
+    fn as_byte(&self) -> u8;
+    fn set_from_byte(&mut self, byte: u8);
+}

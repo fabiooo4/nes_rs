@@ -7,7 +7,6 @@ use std::fmt::Debug;
 
 use bus::Bus;
 use cartridge::Rom;
-use log::monitor;
 use opcodes::{AddressingMode, Code};
 
 const STACK: u16 = 0x0100;
@@ -23,28 +22,9 @@ pub struct CPU {
     bus: Bus,
 }
 
-impl Debug for CPU {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::io::{Write, stdin, stdout};
-        writeln!(f, "{}", monitor(self))?;
-
-        let mut s = String::new();
-        let _ = stdout().flush();
-        stdin()
-            .read_line(&mut s)
-            .expect("Did not enter a correct string");
-
-        if s.trim() == "q" {
-            std::process::exit(0);
-        }
-
-        Ok(())
-    }
-}
-
 pub trait Memory {
     /// Reads a byte from memory
-    fn mem_read(&self, addr: u16) -> u8;
+    fn mem_read(&mut self, addr: u16) -> u8;
 
     /// Writes a byte to memory
     fn mem_write(&mut self, addr: u16, data: u8);
@@ -60,7 +40,7 @@ pub trait Memory {
     }
 
     /// Reads a 16-bit value from memory (little endian)
-    fn mem_read_16(&self, addr: u16) -> u16 {
+    fn mem_read_16(&mut self, addr: u16) -> u16 {
         // Little endian
         let low = self.mem_read(addr) as u16;
         let high = self.mem_read(addr.wrapping_add(1)) as u16;
@@ -70,7 +50,7 @@ pub trait Memory {
 }
 
 impl Memory for CPU {
-    fn mem_read(&self, addr: u16) -> u8 {
+    fn mem_read(&mut self, addr: u16) -> u8 {
         self.bus.mem_read(addr)
     }
 
@@ -78,7 +58,7 @@ impl Memory for CPU {
         self.bus.mem_write(addr, data)
     }
 
-    fn mem_read_16(&self, addr: u16) -> u16 {
+    fn mem_read_16(&mut self, addr: u16) -> u16 {
         self.bus.mem_read_16(addr)
     }
 
@@ -153,7 +133,7 @@ impl CPU {
 
             // Step by step debug
             #[cfg(all(debug_assertions, not(test)))]
-            println!("{:?}", self);
+            self.debug();
 
             let code = self.mem_read(self.program_counter);
             let opcode = opcodes::CPU_OPCODES
@@ -255,6 +235,23 @@ impl CPU {
         }
     }
 
+    #[cfg(all(debug_assertions, not(test)))]
+    fn debug(&mut self) {
+        use log::monitor;
+        use std::io::{Write, stdin, stdout};
+        println!("{}", monitor(self));
+
+        let mut s = String::new();
+        let _ = stdout().flush();
+        stdin()
+            .read_line(&mut s)
+            .expect("Did not enter a correct string");
+
+        if s.trim() == "q" {
+            std::process::exit(0);
+        }
+    }
+
     /// Sets register A and updates `zero` and `negative` status flags
     fn set_register_a(&mut self, value: u8) {
         self.register_a = value;
@@ -326,7 +323,7 @@ impl CPU {
     ///
     /// # Returns
     /// Returns `None` if the mode is implied
-    fn get_parameters_address(&self, mode: &AddressingMode, start_addr: u16) -> Option<u16> {
+    fn get_parameters_address(&mut self, mode: &AddressingMode, start_addr: u16) -> Option<u16> {
         match mode {
             AddressingMode::Immediate => Some(start_addr),
             AddressingMode::ZeroPage => Some(self.mem_read(start_addr) as u16),
@@ -1300,10 +1297,9 @@ mod test {
             lda #0x2
             tax
             lda 0x33,x
-            brk
         );
 
-        assert_eq!(&program, &[0xa9, 0x02, 0xaa, 0xb5, 0x33, 0x00]);
+        assert_eq!(&program, &[0xa9, 0x02, 0xaa, 0xb5, 0x33]);
     }
     // Assembler test --------------------------------------------------------
 
@@ -1344,7 +1340,6 @@ mod test {
     fn test_0xa9_lda_immediate() {
         let program = assemble6502!(
             lda #0x5
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1359,7 +1354,6 @@ mod test {
     fn test_0xa9_lda_zero_flag() {
         let program = assemble6502!(
             lda #0x00
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1371,7 +1365,6 @@ mod test {
     fn test_0xa9_lda_negative_flag() {
         let program = assemble6502!(
             lda #0xff
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1383,7 +1376,6 @@ mod test {
     fn test_0xa5_lda_zero_page() {
         let program = assemble6502!(
             lda 0x33
-            brk
         );
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.mem_write(0x33, 0x0a);
@@ -1398,7 +1390,6 @@ mod test {
             lda #0x2
             tax
             lda 0x33,x
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1412,7 +1403,6 @@ mod test {
     fn test_0xad_lda_absolute() {
         let program = assemble6502!(
             lda abs 0x1234
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1427,7 +1417,6 @@ mod test {
         let program = assemble6502!(
             ldx #0x1
             lda abs 0x1234,x
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1442,7 +1431,6 @@ mod test {
         let program = assemble6502!(
             ldy #0x1
             lda abs 0x1234,y
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1477,7 +1465,6 @@ mod test {
         let program = assemble6502!(
             lda #0x11
             tax
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1493,7 +1480,6 @@ mod test {
         let program = assemble6502!(
             lda #0x00
             tax
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1509,7 +1495,6 @@ mod test {
             lda #0x04
             tax
             inx
-            brk
         );
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
@@ -1523,7 +1508,6 @@ mod test {
             tax
             inx
             inx
-            brk
         );
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
@@ -1539,7 +1523,6 @@ mod test {
             lda #0xc0
             tax
             inx
-            brk
         );
         let mut cpu = CPU::new(test_rom(program.to_vec()));
         cpu.run();
@@ -1554,7 +1537,6 @@ mod test {
         let program = assemble6502!(
             adc #0x04
             adc #0x04
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1572,7 +1554,6 @@ mod test {
         let program = assemble6502!(
             adc #0xff
             adc #0x04
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1589,7 +1570,6 @@ mod test {
     fn test_0x69_adc_negative() {
         let program = assemble6502!(
             adc #0xff
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1607,7 +1587,6 @@ mod test {
         let program = assemble6502!(
             lda #0xff
             adc #0x01
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1625,7 +1604,6 @@ mod test {
         let program = assemble6502!(
             lda #0x01
             adc 0xc4
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1641,7 +1619,6 @@ mod test {
             lda #0x01
             ldx #0x03
             adc 0xc4,x
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1656,7 +1633,6 @@ mod test {
         let program = assemble6502!(
             lda #0x01
             adc abs 0x1234
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1672,7 +1648,6 @@ mod test {
             ldx #0x03
             lda #0x01
             adc abs 0x1234,x
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1688,7 +1663,6 @@ mod test {
             ldy #0x03
             lda #0x01
             adc abs 0x1234,y
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1704,7 +1678,6 @@ mod test {
             ldx #0x03
             lda #0x01
             adc (0x12,x)
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1721,7 +1694,6 @@ mod test {
             ldy #0x03
             lda #0x01
             adc (0x12),y
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1739,7 +1711,6 @@ mod test {
         let program = assemble6502!(
             lda #0b11111110
             and #0b00000011
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1753,7 +1724,6 @@ mod test {
         let program = assemble6502!(
             lda #0xff
             and 0xc4
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1769,7 +1739,6 @@ mod test {
             lda #0xff
             ldx #0x03
             and 0xc4,x
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1784,7 +1753,6 @@ mod test {
         let program = assemble6502!(
             lda #0xff
             and abs 0x1234
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1800,7 +1768,6 @@ mod test {
             ldx #0x03
             lda #0xff
             and abs 0x1234,x
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1816,7 +1783,6 @@ mod test {
             ldy #0x03
             lda #0xff
             and abs 0x1234,y
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1832,7 +1798,6 @@ mod test {
             ldx #0x03
             lda #0xff
             and (0x12,x)
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1849,7 +1814,6 @@ mod test {
             ldy #0x03
             lda #0xff
             and (0x12),y
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1867,7 +1831,6 @@ mod test {
         let program = assemble6502!(
             lda #0x02
             asl a
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1883,7 +1846,6 @@ mod test {
         let program = assemble6502!(
             lda #0b10000000
             asl a
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1924,7 +1886,6 @@ mod test {
         let program = assemble6502!(
             lda #0x01
             cmp #0x00
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1940,7 +1901,6 @@ mod test {
         let program = assemble6502!(
             lda #0x01
             cmp #0x01
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1956,7 +1916,6 @@ mod test {
         let program = assemble6502!(
             lda #0x01
             cmp #0x03
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1973,7 +1932,6 @@ mod test {
     fn test_0xce_dec_absolute() {
         let program = assemble6502!(
             dec abs 0x1234
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -1990,7 +1948,6 @@ mod test {
         let program = assemble6502!(
             lda #0b10101010
             eor #0b01010101
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
@@ -2257,7 +2214,6 @@ mod test {
             php
             rti
             lda #0x01
-            brk
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));

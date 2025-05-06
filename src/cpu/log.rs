@@ -6,7 +6,7 @@ use super::{
 };
 
 /// Logs the current cpu instruction to stdout
-pub fn log(cpu: &CPU) -> String {
+pub fn log(cpu: &mut CPU) -> String {
     let code = cpu.mem_read(cpu.program_counter);
     let opcode = opcodes::CPU_OPCODES
         .get(&code)
@@ -153,7 +153,7 @@ pub fn log(cpu: &CPU) -> String {
 
 /// This mode prints on stdout one bank of memory and all of
 /// the stack along with cpu registers status
-pub fn monitor(cpu: &CPU) -> String {
+pub fn monitor(cpu: &mut CPU) -> String {
     use crate::cpu::STACK;
 
     let code = cpu.mem_read(cpu.program_counter);
