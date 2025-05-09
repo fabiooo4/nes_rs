@@ -20,6 +20,8 @@ pub struct CPU {
     pub program_counter: u16,
     stack_pointer: u8,
     bus: Bus,
+
+    page_crossed: bool,
 }
 
 pub trait Memory {
@@ -30,7 +32,7 @@ pub trait Memory {
     fn mem_write(&mut self, addr: u16, data: u8);
 
     /// Writes a 16-bit value to memory (little endian)
-    fn mem_write_16(&mut self, addr: u16, data: u16) {
+    fn mem_write_u16(&mut self, addr: u16, data: u16) {
         // Little endian
         let high = (data & 0xFF) as u8;
         let low = (data >> 8) as u8;
@@ -40,7 +42,7 @@ pub trait Memory {
     }
 
     /// Reads a 16-bit value from memory (little endian)
-    fn mem_read_16(&mut self, addr: u16) -> u16 {
+    fn mem_read_u16(&mut self, addr: u16) -> u16 {
         // Little endian
         let low = self.mem_read(addr) as u16;
         let high = self.mem_read(addr.wrapping_add(1)) as u16;
@@ -58,12 +60,12 @@ impl Memory for CPU {
         self.bus.mem_write(addr, data)
     }
 
-    fn mem_read_16(&mut self, addr: u16) -> u16 {
-        self.bus.mem_read_16(addr)
+    fn mem_read_u16(&mut self, addr: u16) -> u16 {
+        self.bus.mem_read_u16(addr)
     }
 
-    fn mem_write_16(&mut self, addr: u16, data: u16) {
-        self.bus.mem_write_16(addr, data);
+    fn mem_write_u16(&mut self, addr: u16, data: u16) {
+        self.bus.mem_write_u16(addr, data);
     }
 }
 
@@ -78,6 +80,7 @@ impl CPU {
             program_counter: 0x8000,
             stack_pointer: STACK_RESET,
             bus: Bus::new(rom),
+            page_crossed: false,
         }
     }
 
@@ -98,7 +101,7 @@ impl CPU {
         }
 
         // Write the program start in 0xFFFC
-        self.mem_write_16(0xFFFC, program_start);
+        self.mem_write_u16(0xFFFC, program_start);
     }
 
     /// Resets the CPU registers and status bits, then loads the program start address from 0xFFFC
@@ -110,7 +113,7 @@ impl CPU {
         self.stack_pointer = STACK_RESET;
 
         // Load program start from 0xFFFC
-        self.program_counter = self.mem_read_16(0xFFFC);
+        self.program_counter = self.mem_read_u16(0xFFFC);
     }
 
     pub fn run(&mut self) {
@@ -129,6 +132,10 @@ impl CPU {
         }
 
         loop {
+            if self.bus.poll_nmi_status().is_some() {
+                self.interrupt_nmi();
+            }
+
             callback(self);
 
             // Step by step debug
@@ -139,51 +146,181 @@ impl CPU {
             let opcode = opcodes::CPU_OPCODES
                 .get(&code)
                 .unwrap_or_else(|| panic!("Invalid opcode: {:02X}", code));
+            let mut opcode_cycles = opcode.cycles;
+            self.page_crossed = false;
 
             self.program_counter += 1;
             let pc_state = self.program_counter;
 
             match opcode.undocumented {
                 false => match opcode.code {
-                    Code::ADC => self.adc(&opcode.mode),
-                    Code::AND => self.and(&opcode.mode),
+                    Code::ADC => {
+                        self.adc(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
+                    Code::AND => {
+                        self.and(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
                     Code::ASL => {
                         self.asl(&opcode.mode);
                     }
-                    Code::BCC => self.branch(!self.status.carry),
-                    Code::BCS => self.branch(self.status.carry),
-                    Code::BEQ => self.branch(self.status.zero),
+                    Code::BCC => {
+                        self.branch(!self.status.carry);
+
+                        if !self.status.carry {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
+                    Code::BCS => {
+                        self.branch(self.status.carry);
+
+                        if self.status.carry {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
+                    Code::BEQ => {
+                        self.branch(self.status.zero);
+
+                        if self.status.zero {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
                     Code::BIT => self.bit(&opcode.mode),
-                    Code::BMI => self.branch(self.status.negative),
-                    Code::BNE => self.branch(!self.status.zero),
-                    Code::BPL => self.branch(!self.status.negative),
+                    Code::BMI => {
+                        self.branch(self.status.negative);
+
+                        if self.status.negative {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
+                    Code::BNE => {
+                        self.branch(!self.status.zero);
+
+                        if !self.status.zero {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
+                    Code::BPL => {
+                        self.branch(!self.status.negative);
+
+                        if !self.status.negative {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
                     Code::BRK => return,
-                    Code::BVC => self.branch(!self.status.overflow),
-                    Code::BVS => self.branch(self.status.overflow),
+                    Code::BVC => {
+                        self.branch(!self.status.overflow);
+
+                        if !self.status.overflow {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
+                    Code::BVS => {
+                        self.branch(self.status.overflow);
+
+                        if self.status.overflow {
+                            opcode_cycles += 1;
+
+                            if self.page_crossed {
+                                opcode_cycles += 2;
+                            }
+                        }
+                    }
                     Code::CLC => self.status.carry = false,
                     Code::CLD => self.status.decimal = false,
                     Code::CLI => self.status.interrupt_disable = false,
                     Code::CLV => self.status.overflow = false,
-                    Code::CMP => self.compare_register(self.register_a, &opcode.mode),
+                    Code::CMP => {
+                        self.compare_register(self.register_a, &opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
                     Code::CPX => self.compare_register(self.register_x, &opcode.mode),
                     Code::CPY => self.compare_register(self.register_y, &opcode.mode),
                     Code::DEC => self.dec(&opcode.mode),
                     Code::DEX => self.dex(),
                     Code::DEY => self.dey(),
-                    Code::EOR => self.eor(&opcode.mode),
+                    Code::EOR => {
+                        self.eor(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
                     Code::INC => self.inc(&opcode.mode),
                     Code::INX => self.inx(),
                     Code::INY => self.iny(),
                     Code::JMP => self.jmp(&opcode.mode),
                     Code::JSR => self.jsr(),
-                    Code::LDA => self.lda(&opcode.mode),
-                    Code::LDX => self.ldx(&opcode.mode),
-                    Code::LDY => self.ldy(&opcode.mode),
+                    Code::LDA => {
+                        self.lda(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
+                    Code::LDX => {
+                        self.ldx(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
+                    Code::LDY => {
+                        self.ldy(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
                     Code::LSR => {
                         self.lsr(&opcode.mode);
                     }
                     Code::NOP => continue,
-                    Code::ORA => self.ora(&opcode.mode),
+                    Code::ORA => {
+                        self.ora(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
                     Code::PHA => self.stack_push(self.register_a),
                     Code::PHP => self.php(),
                     Code::PLA => self.pla(),
@@ -196,7 +333,13 @@ impl CPU {
                     }
                     Code::RTI => self.rti(),
                     Code::RTS => self.rts(),
-                    Code::SBC => self.sbc(&opcode.mode),
+                    Code::SBC => {
+                        self.sbc(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
                     Code::SEC => self.status.carry = true,
                     Code::SED => self.status.decimal = true,
                     Code::SEI => self.status.interrupt_disable = true,
@@ -212,8 +355,20 @@ impl CPU {
                     _ => unreachable!(),
                 },
                 true => match opcode.code {
-                    Code::NOP => self.dop(&opcode.mode),
-                    Code::LAX => self.lax(&opcode.mode),
+                    Code::NOP => {
+                        self.dop(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
+                    Code::LAX => {
+                        self.lax(&opcode.mode);
+
+                        if self.page_crossed {
+                            opcode_cycles += 1;
+                        }
+                    }
                     Code::SAX => self.store_reg(&opcode.mode, self.register_x & self.register_a),
                     Code::SBC => self.sbc(&opcode.mode),
                     Code::DCP => self.dcp(&opcode.mode),
@@ -225,6 +380,8 @@ impl CPU {
                     _ => unreachable!(),
                 },
             }
+
+            self.bus.tick(opcode_cycles);
 
             // Update program counter based on parameter length
             if self.program_counter == pc_state {
@@ -293,7 +450,7 @@ impl CPU {
     }
 
     // Push a 16 bit value to the stack
-    fn stack_push_16(&mut self, value: u16) {
+    fn stack_push_u16(&mut self, value: u16) {
         let high = (value >> 8) as u8;
         let low = (value & 0xff) as u8;
 
@@ -312,7 +469,7 @@ impl CPU {
     }
 
     /// Pop a 16 bit value from the stack
-    fn stack_pop_16(&mut self) -> u16 {
+    fn stack_pop_u16(&mut self) -> u16 {
         let low = self.stack_pop() as u16;
         let high = self.stack_pop() as u16;
 
@@ -336,20 +493,32 @@ impl CPU {
                 Some(self.mem_read(start_addr).wrapping_add(self.register_y) as u16)
             }
 
-            AddressingMode::Absolute => Some(self.mem_read_16(start_addr)),
+            AddressingMode::Absolute => Some(self.mem_read_u16(start_addr)),
 
-            AddressingMode::Absolute_X => Some(
-                self.mem_read_16(start_addr)
-                    .wrapping_add(self.register_x as u16),
-            ),
+            AddressingMode::Absolute_X => {
+                let addr = self.mem_read_u16(start_addr);
+                let res = addr.wrapping_add(self.register_x as u16);
 
-            AddressingMode::Absolute_Y => Some(
-                self.mem_read_16(start_addr)
-                    .wrapping_add(self.register_y as u16),
-            ),
+                if ((res & 0xff) as u8) < ((addr & 0xff) as u8) {
+                    self.page_crossed = true;
+                }
+
+                Some(res)
+            }
+
+            AddressingMode::Absolute_Y => {
+                let addr = self.mem_read_u16(start_addr);
+                let res = addr.wrapping_add(self.register_y as u16);
+
+                if ((res & 0xff) as u8) < ((addr & 0xff) as u8) {
+                    self.page_crossed = true;
+                }
+
+                Some(res)
+            }
 
             AddressingMode::Indirect => {
-                let base = self.mem_read_16(start_addr);
+                let base = self.mem_read_u16(start_addr);
 
                 let deref_base = if base & 0x00FF == 0x00FF {
                     let low = self.mem_read(base) as u16;
@@ -357,7 +526,7 @@ impl CPU {
 
                     high << 8 | low
                 } else {
-                    self.mem_read_16(base)
+                    self.mem_read_u16(base)
                 };
 
                 Some(deref_base)
@@ -377,8 +546,13 @@ impl CPU {
                 let high = self.mem_read(base.wrapping_add(1) as u16) as u16;
 
                 let deref_base = (high << 8) | low;
+                let res = deref_base.wrapping_add(self.register_y as u16);
 
-                Some(deref_base.wrapping_add(self.register_y as u16))
+                if ((res & 0xff) as u8) < ((deref_base & 0xff) as u8) {
+                    self.page_crossed = true;
+                }
+
+                Some(res)
             }
 
             AddressingMode::Implied => None,
@@ -402,6 +576,20 @@ impl CPU {
 
             AddressingMode::Implied => 0,
         }
+    }
+
+    /// Executes the NMI interrupt
+    fn interrupt_nmi(&mut self) {
+        self.stack_push_u16(self.program_counter);
+        let mut status = self.status.clone();
+        status.brk = false;
+        self.stack_push(status.as_byte());
+
+        self.status.interrupt_disable = true;
+
+        // Load address of interrupt handler
+        self.bus.tick(2);
+        self.program_counter = self.mem_read_u16(0xFFFA);
     }
 }
 
@@ -507,11 +695,17 @@ impl CPU {
         let param_addr = self.get_parameters_address(&AddressingMode::Immediate, self.program_counter).unwrap(/* safe */);
         let value: i8 = self.mem_read(param_addr) as i8;
 
+        let res = self
+            .program_counter
+            .wrapping_add(1)
+            .wrapping_add(value as u16);
+
+        if ((res & 0xff) as u8) < ((self.program_counter & 0xff) as u8) {
+            self.page_crossed = true;
+        }
+
         if condition {
-            self.program_counter = self
-                .program_counter
-                .wrapping_add(1)
-                .wrapping_add(value as u16);
+            self.program_counter = res;
         }
     }
 
@@ -688,7 +882,7 @@ impl CPU {
     /// | Absolute         | 20     | 3     | 6                          |
     fn jsr(&mut self) {
         let target_addr = self.get_parameters_address(&AddressingMode::Absolute, self.program_counter).unwrap(/* safe */);
-        self.stack_push_16(self.program_counter.wrapping_add(1));
+        self.stack_push_u16(self.program_counter.wrapping_add(1));
 
         self.program_counter = target_addr;
     }
@@ -919,7 +1113,7 @@ impl CPU {
     /// | Implied          | 40     | 1     | 6                          |
     fn rti(&mut self) {
         self.plp(); // Pop cpu status
-        let target_addr = self.stack_pop_16();
+        let target_addr = self.stack_pop_u16();
 
         self.status.brk = false;
         self.program_counter = target_addr;
@@ -933,7 +1127,7 @@ impl CPU {
     /// |------------------|--------|-------|----------------------------|
     /// | Implied          | 60     | 1     | 6                          |
     fn rts(&mut self) {
-        let target_addr = self.stack_pop_16() + 1;
+        let target_addr = self.stack_pop_u16() + 1;
         self.program_counter = target_addr;
     }
 
@@ -1208,7 +1402,7 @@ impl CPU {
 /// |+-------- Overflow
 /// +--------- Negative
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Status {
     /// The negative flag is set if the result of the last operation had bit 7
     /// set to a one
@@ -1287,6 +1481,8 @@ impl Status {
 
 #[cfg(test)]
 mod test {
+    use crate::cpu::log::monitor;
+
     use super::*;
     use cartridge::test::test_rom;
 
@@ -1312,9 +1508,9 @@ mod test {
     }
 
     #[test]
-    fn test_mem_write_16() {
+    fn test_mem_write_u16() {
         let mut cpu = CPU::new(test_rom(vec![0x00]));
-        cpu.mem_write_16(0x1234, 0x420);
+        cpu.mem_write_u16(0x1234, 0x420);
         assert_eq!(cpu.mem_read(0x1234), 0x20);
         assert_eq!(cpu.mem_read(0x1235), 0x04)
     }
@@ -1327,11 +1523,11 @@ mod test {
     }
 
     #[test]
-    fn test_mem_read_16() {
+    fn test_mem_read_u16() {
         let mut cpu = CPU::new(test_rom(vec![0x00]));
         cpu.mem_write(0x1234, 0x20);
         cpu.mem_write(0x1235, 0x04);
-        assert_eq!(cpu.mem_read_16(0x1234), 0x0420);
+        assert_eq!(cpu.mem_read_u16(0x1234), 0x0420);
     }
     // Memory read/write tests ----------------------
 
@@ -1636,7 +1832,7 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x1234, 0x03);
+        cpu.mem_write_u16(0x1234, 0x03);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x04);
@@ -1651,7 +1847,7 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x1237, 0x03);
+        cpu.mem_write_u16(0x1237, 0x03);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x04);
@@ -1666,7 +1862,7 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x1237, 0x03);
+        cpu.mem_write_u16(0x1237, 0x03);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x04);
@@ -1681,8 +1877,8 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x15, 0x1234);
-        cpu.mem_write_16(0x1234, 0x03);
+        cpu.mem_write_u16(0x15, 0x1234);
+        cpu.mem_write_u16(0x1234, 0x03);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x04);
@@ -1697,8 +1893,8 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x12, 0x1234);
-        cpu.mem_write_16(0x1237, 0x03);
+        cpu.mem_write_u16(0x12, 0x1234);
+        cpu.mem_write_u16(0x1237, 0x03);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x04);
@@ -1756,7 +1952,7 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x1234, 0b10101010);
+        cpu.mem_write_u16(0x1234, 0b10101010);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b10101010);
@@ -1771,7 +1967,7 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x1237, 0b10101010);
+        cpu.mem_write_u16(0x1237, 0b10101010);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b10101010);
@@ -1786,7 +1982,7 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x1237, 0b10101010);
+        cpu.mem_write_u16(0x1237, 0b10101010);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b10101010);
@@ -1801,8 +1997,8 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x15, 0x1234);
-        cpu.mem_write_16(0x1234, 0b10101010);
+        cpu.mem_write_u16(0x15, 0x1234);
+        cpu.mem_write_u16(0x1234, 0b10101010);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b10101010);
@@ -1817,8 +2013,8 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.mem_write_16(0x12, 0x1234);
-        cpu.mem_write_16(0x1237, 0b10101010);
+        cpu.mem_write_u16(0x12, 0x1234);
+        cpu.mem_write_u16(0x1237, 0b10101010);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b10101010);
@@ -2053,7 +2249,7 @@ mod test {
         cpu.run();
         assert_eq!(cpu.register_a, 0x00);
         assert_eq!(cpu.program_counter, program_start + 0x06);
-        assert_eq!(cpu.stack_pop_16(), program_start + 0x02);
+        assert_eq!(cpu.stack_pop_u16(), program_start + 0x02);
     }
     // JSR test ----------------------------------------
 
@@ -2217,7 +2413,7 @@ mod test {
         );
 
         let mut cpu = CPU::new(test_rom(program.to_vec()));
-        cpu.stack_push_16(cpu.program_counter + 4); // Push pc first
+        cpu.stack_push_u16(cpu.program_counter + 4); // Push pc first
         cpu.run(); // Then rti
 
         assert_eq!(cpu.register_a, 0x00);
@@ -2349,4 +2545,70 @@ mod test {
         assert_eq!(cpu.register_x, cpu.stack_pointer)
     }
     // TSX test ----------------------------------------
+
+    // Page crossed test -------------------------------
+    #[test]
+    fn test_0xbd_lda_page_crossed_absolute_x() {
+        let program = assemble6502!(
+            ldx #0x01
+            lda abs 0x00ff,x
+        );
+
+        let mut page_crossed = false;
+        let mut cpu = CPU::new(test_rom(program.to_vec()));
+
+        cpu.run_with_callback(|cpu| {
+            println!("PageCrossed: {}", cpu.page_crossed);
+            if cpu.page_crossed {
+                page_crossed = true;
+            }
+        });
+
+        assert!(page_crossed);
+    }
+
+    #[test]
+    fn test_0xb9_lda_page_crossed_absolute_y() {
+        let program = assemble6502!(
+            ldy #0x01
+            lda abs 0x00ff,y
+        );
+
+        let mut page_crossed = false;
+        let mut cpu = CPU::new(test_rom(program.to_vec()));
+
+        cpu.run_with_callback(|cpu| {
+            println!("PageCrossed: {}", cpu.page_crossed);
+            if cpu.page_crossed {
+                page_crossed = true;
+            }
+        });
+
+        assert!(page_crossed);
+    }
+
+    #[test]
+    fn test_0xb1_lda_page_crossed_indirect_y() {
+        let program = assemble6502!(
+            ldy #0x01
+            lda (0x00),y
+        );
+
+        let mut page_crossed = false;
+        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        cpu.mem_write(0x00, 0xff);
+        cpu.mem_write(0x01, 0x00);
+        cpu.mem_write(0x0100, 0x69);
+
+        cpu.run_with_callback(|cpu| {
+            println!("PageCrossed: {}", cpu.page_crossed);
+            if cpu.page_crossed {
+                page_crossed = true;
+            }
+        });
+
+        assert_eq!(cpu.register_a, 0x69);
+        assert!(page_crossed);
+    }
+    // Page crossed test -------------------------------
 }

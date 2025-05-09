@@ -8,20 +8,25 @@ use registers::{
 
 #[allow(clippy::upper_case_acronyms)]
 pub struct PPU {
-    pub chr_rom: Vec<u8>,
-    pub palette_table: [u8; 32],
-    pub vram: [u8; 2048],
-    pub addr: AddressRegister,
-    pub ctrl: ControlRegister,
-    pub mask: MaskRegister,
-    pub status: StatusRegister,
-    pub oam_data: [u8; 256],
-    pub oam_addr: u8,
-    pub scroll: ScrollRegister,
+    chr_rom: Vec<u8>,
+    palette_table: [u8; 32],
+    vram: [u8; 2048],
+    addr: AddressRegister,
+    ctrl: ControlRegister,
+    mask: MaskRegister,
+    status: StatusRegister,
+    oam_data: [u8; 256],
+    oam_addr: u8,
+    scroll: ScrollRegister,
 
-    pub mirroring: Mirroring,
+    mirroring: Mirroring,
 
-    pub internal_data_buf: u8,
+    internal_data_buf: u8,
+
+    cycles: usize,
+    scanlines: usize,
+
+    pub nmi_interrupt: Option<u8>,
 }
 
 impl PPU {
@@ -39,6 +44,9 @@ impl PPU {
             scroll: ScrollRegister::new(),
             mirroring,
             internal_data_buf: 0,
+            cycles: 0,
+            scanlines: 0,
+            nmi_interrupt: None,
         }
     }
 
@@ -71,6 +79,39 @@ impl PPU {
             _ => vram_index,
         }
     }
+
+    /// Ticks the given clock cycles to progress the scanline
+    pub fn tick(&mut self, cycles: usize) -> bool {
+        self.cycles += cycles;
+
+        // Horizontal
+        if self.cycles >= 341 {
+            // Wrap
+            self.cycles -= 341;
+            self.scanlines += 1;
+
+            // Vertical
+            if self.scanlines == 241 {
+                self.status.vblank = true;
+                self.status.sprite_0_hit = false;
+                if self.ctrl.generate_nmi {
+                    self.nmi_interrupt = Some(1);
+                }
+            }
+
+            if self.scanlines >= 262 {
+                self.scanlines = 0;
+                self.nmi_interrupt = None;
+
+                self.status.vblank = false;
+                self.status.sprite_0_hit = false;
+
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 pub trait PPUOperations {
@@ -94,8 +135,17 @@ impl PPUOperations for PPU {
     }
 
     /// Writes to the PPU control register
+    ///
+    /// NMI interrupt occurs if both of the following conditions are met
+    /// - Control flag generate_nmi is updated from 0 to 1
+    /// - PPU is in VBLANK
     fn write_to_ctrl(&mut self, data: u8) {
+        let before_nmi_status = self.ctrl.generate_nmi;
         self.ctrl.set_from_byte(data);
+
+        if !before_nmi_status && self.ctrl.generate_nmi && self.status.vblank {
+            self.nmi_interrupt = Some(1)
+        }
     }
 
     /// Writes to the PPU mask register

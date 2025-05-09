@@ -1,4 +1,4 @@
-use crate::ppu::{PPUOperations, PPU};
+use crate::ppu::{PPU, PPUOperations};
 
 use super::{Memory, cartridge::Rom};
 
@@ -6,6 +6,8 @@ pub struct Bus {
     cpu_wram: [u8; 2048], // 11 Bits
     prg_rom: Vec<u8>,
     ppu: PPU,
+
+    cycles: usize,
 }
 
 impl Bus {
@@ -14,6 +16,7 @@ impl Bus {
             cpu_wram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
+            cycles: 0,
         }
     }
 
@@ -26,6 +29,17 @@ impl Bus {
         }
 
         self.prg_rom[addr as usize]
+    }
+
+    /// Tick the clock of other components based on the CPU cycles
+    pub fn tick(&mut self, cycles: usize) {
+        self.cycles += cycles;
+        self.ppu.tick(cycles * 3);
+    }
+
+    /// Gets the nmi interrupt status from the PPU
+    pub fn poll_nmi_status(&mut self) -> Option<u8> {
+        self.ppu.nmi_interrupt.take()
     }
 }
 
