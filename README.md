@@ -13,7 +13,7 @@ NES architecture.
 
 - [x] CPU emulation
 - [x] BUS emulation
-- [ ] ROM loading
+- [x] ROM loading
 - [ ] PPU emulation
 - [ ] Input handling
 - [ ] APU emulation

@@ -3,8 +3,8 @@ use std::{fs, process::exit};
 use nes_rs::{
     cpu::{CPU, Memory, cartridge::Rom},
     render::{
-        frame::{self, WIDTH},
-        show_tile, show_tile_bank,
+        frame::{self},
+        show_tile_bank,
     },
 };
 use sdl2::{
