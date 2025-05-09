@@ -49,6 +49,20 @@ impl ControlRegister {
             false => 1,
         }
     }
+
+    pub fn get_background_pattern_addr(&self) -> u16 {
+        match self.backround_pattern_addr {
+            true => 0x1000,
+            false => 0,
+        }
+    }
+
+    pub fn get_sprite_pattern_addr(&self) -> u16 {
+        match self.sprite_pattern_addr {
+            true => 0x1000,
+            false => 0,
+        }
+    }
 }
 
 impl BitFlags for ControlRegister {

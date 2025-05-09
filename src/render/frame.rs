@@ -13,8 +13,6 @@ impl Frame {
     }
 
     pub fn set_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8)) {
-        assert!(x < WIDTH && y < HEIGHT);
-
         let base = y * WIDTH * 3 + x * 3;
         if base + 2 < self.data.len() {
             self.data[base] = color.0;

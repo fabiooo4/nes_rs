@@ -1,4 +1,4 @@
-mod bus;
+pub mod bus;
 pub mod cartridge;
 pub mod log;
 mod opcodes;
@@ -6,20 +6,19 @@ mod opcodes;
 use std::fmt::Debug;
 
 use bus::Bus;
-use cartridge::Rom;
 use opcodes::{AddressingMode, Code};
 
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xfd;
 
-pub struct CPU {
+pub struct CPU<'a> {
     register_a: u8,
     register_x: u8,
     register_y: u8,
     status: Status,
     pub program_counter: u16,
     stack_pointer: u8,
-    bus: Bus,
+    bus: Bus<'a>,
 
     page_crossed: bool,
 }
@@ -51,7 +50,7 @@ pub trait Memory {
     }
 }
 
-impl Memory for CPU {
+impl Memory for CPU<'_> {
     fn mem_read(&mut self, addr: u16) -> u8 {
         self.bus.mem_read(addr)
     }
@@ -69,9 +68,9 @@ impl Memory for CPU {
     }
 }
 
-impl CPU {
+impl<'a> CPU<'a> {
     /// Creates a new CPU instance with default values
-    pub fn new(rom: Rom) -> Self {
+    pub fn new(bus: Bus<'a>) -> Self {
         CPU {
             register_a: 0,
             register_x: 0,
@@ -79,29 +78,9 @@ impl CPU {
             status: Status::new(),
             program_counter: 0x8000,
             stack_pointer: STACK_RESET,
-            bus: Bus::new(rom),
+            bus,
             page_crossed: false,
         }
-    }
-
-    /// Loads a program into memory and runs it
-    pub fn load_and_run(&mut self, program: &[u8]) {
-        self.load(program);
-        self.reset();
-        self.run();
-    }
-
-    /// Loads a program into memory
-    ///
-    /// The starting point of the program is written to 0xFFFC
-    pub fn load(&mut self, program: &[u8]) {
-        let program_start = 0x0000;
-        for i in 0..(program.len() as u16) {
-            self.mem_write(program_start + i, program[i as usize]);
-        }
-
-        // Write the program start in 0xFFFC
-        self.mem_write_u16(0xFFFC, program_start);
     }
 
     /// Resets the CPU registers and status bits, then loads the program start address from 0xFFFC
@@ -392,7 +371,7 @@ impl CPU {
         }
     }
 
-    #[cfg(all(debug_assertions, not(test)))]
+    #[cfg(all(not(test), feature = "debug"))]
     fn debug(&mut self) {
         use log::monitor;
         use std::io::{Write, stdin, stdout};
@@ -441,10 +420,6 @@ impl CPU {
 
     /// Push a byte to the stack
     fn stack_push(&mut self, value: u8) {
-        if self.stack_pointer.checked_sub(1).is_none() || self.stack_pointer > STACK_RESET {
-            panic!("Stack overflow")
-        }
-
         self.mem_write(STACK + self.stack_pointer as u16, value);
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
     }
@@ -460,12 +435,8 @@ impl CPU {
 
     /// Pop a byte from the stack
     fn stack_pop(&mut self) -> u8 {
-        if self.stack_pointer + 1 > STACK_RESET {
-            panic!("Stack overflow")
-        }
-        let res = self.mem_read(STACK + self.stack_pointer as u16 + 1);
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
-        res
+        self.mem_read(STACK + self.stack_pointer as u16)
     }
 
     /// Pop a 16 bit value from the stack
@@ -594,7 +565,7 @@ impl CPU {
 }
 
 /// Opcodes implementation
-impl CPU {
+impl CPU<'_> {
     /// This instruction adds the contents of a memory location to the
     /// accumulator together with the carry bit. If overflow occurs the
     /// carry bit is set, this enables multiple byte addition to be performed
@@ -1500,14 +1471,16 @@ mod test {
     // Memory read/write tests ----------------------
     #[test]
     fn test_mem_write() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1234, 0x69);
         assert_eq!(cpu.mem_read(0x1234), 0x69)
     }
 
     #[test]
     fn test_mem_write_u16() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x1234, 0x420);
         assert_eq!(cpu.mem_read(0x1234), 0x20);
         assert_eq!(cpu.mem_read(0x1235), 0x04)
@@ -1515,14 +1488,16 @@ mod test {
 
     #[test]
     fn test_mem_read() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1234, 0x69);
         assert_eq!(cpu.mem_read(0x1234), 0x69)
     }
 
     #[test]
     fn test_mem_read_u16() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1234, 0x20);
         cpu.mem_write(0x1235, 0x04);
         assert_eq!(cpu.mem_read_u16(0x1234), 0x0420);
@@ -1536,7 +1511,8 @@ mod test {
             lda #0x5
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x05);
@@ -1550,7 +1526,8 @@ mod test {
             lda #0x00
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
         assert!(cpu.status.zero);
     }
@@ -1561,7 +1538,8 @@ mod test {
             lda #0xff
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
         assert!(cpu.status.negative);
     }
@@ -1571,7 +1549,8 @@ mod test {
         let program = assemble6502!(
             lda 0x33
         );
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x33, 0x0a);
         cpu.run();
 
@@ -1586,7 +1565,8 @@ mod test {
             lda 0x33,x
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x35, 0x0a);
         cpu.run();
 
@@ -1599,7 +1579,8 @@ mod test {
             lda abs 0x1234
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1234, 0x08);
         cpu.run();
 
@@ -1613,7 +1594,8 @@ mod test {
             lda abs 0x1234,x
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1235, 0x08);
         cpu.run();
 
@@ -1627,7 +1609,8 @@ mod test {
             lda abs 0x1234,y
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1235, 0x08);
         cpu.run();
 
@@ -1647,7 +1630,8 @@ mod test {
             lda (0x01),y
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
         assert_eq!(cpu.register_a, 0x0a);
     }
@@ -1661,7 +1645,8 @@ mod test {
             tax
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
         assert_eq!(cpu.register_a, 0x11);
         assert_eq!(cpu.register_x, 0x11);
@@ -1676,7 +1661,8 @@ mod test {
             tax
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
         assert!(cpu.status.zero);
     }
@@ -1690,7 +1676,8 @@ mod test {
             tax
             inx
         );
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_x, 5)
@@ -1703,7 +1690,8 @@ mod test {
             inx
             inx
         );
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_x, 1)
@@ -1718,7 +1706,8 @@ mod test {
             tax
             inx
         );
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_x, 0xc1)
@@ -1733,7 +1722,8 @@ mod test {
             adc #0x04
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x08);
@@ -1750,7 +1740,8 @@ mod test {
             adc #0x04
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x03);
@@ -1766,7 +1757,8 @@ mod test {
             adc #0xff
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0xff);
@@ -1783,7 +1775,8 @@ mod test {
             adc #0x01
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x00);
@@ -1800,7 +1793,8 @@ mod test {
             adc 0xc4
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0xc4, 0x09);
         cpu.run();
 
@@ -1815,7 +1809,8 @@ mod test {
             adc 0xc4,x
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0xc7, 0x09);
         cpu.run();
 
@@ -1829,7 +1824,8 @@ mod test {
             adc abs 0x1234
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x1234, 0x03);
         cpu.run();
 
@@ -1844,7 +1840,8 @@ mod test {
             adc abs 0x1234,x
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x1237, 0x03);
         cpu.run();
 
@@ -1859,7 +1856,8 @@ mod test {
             adc abs 0x1234,y
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x1237, 0x03);
         cpu.run();
 
@@ -1874,7 +1872,8 @@ mod test {
             adc (0x12,x)
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x15, 0x1234);
         cpu.mem_write_u16(0x1234, 0x03);
         cpu.run();
@@ -1890,7 +1889,8 @@ mod test {
             adc (0x12),y
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x12, 0x1234);
         cpu.mem_write_u16(0x1237, 0x03);
         cpu.run();
@@ -1907,7 +1907,8 @@ mod test {
             and #0b00000011
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x02);
@@ -1920,7 +1921,8 @@ mod test {
             and 0xc4
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0xc4, 0b10000000);
         cpu.run();
 
@@ -1935,7 +1937,8 @@ mod test {
             and 0xc4,x
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0xc7, 0b10101010);
         cpu.run();
 
@@ -1949,7 +1952,8 @@ mod test {
             and abs 0x1234
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x1234, 0b10101010);
         cpu.run();
 
@@ -1964,7 +1968,8 @@ mod test {
             and abs 0x1234,x
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x1237, 0b10101010);
         cpu.run();
 
@@ -1979,7 +1984,8 @@ mod test {
             and abs 0x1234,y
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x1237, 0b10101010);
         cpu.run();
 
@@ -1994,7 +2000,8 @@ mod test {
             and (0x12,x)
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x15, 0x1234);
         cpu.mem_write_u16(0x1234, 0b10101010);
         cpu.run();
@@ -2010,7 +2017,8 @@ mod test {
             and (0x12),y
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write_u16(0x12, 0x1234);
         cpu.mem_write_u16(0x1237, 0b10101010);
         cpu.run();
@@ -2027,7 +2035,8 @@ mod test {
             asl a
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x04);
@@ -2042,7 +2051,8 @@ mod test {
             asl a
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x0);
@@ -2062,7 +2072,8 @@ mod test {
 
         assert_eq!(&program, &[0xa9, 0xfe, 0x69, 0x01, 0x90, 0xfc, 0x00]);
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         let pc = cpu.program_counter;
         assert!(!cpu.status.carry);
         cpu.run();
@@ -2082,7 +2093,8 @@ mod test {
             cmp #0x00
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert!(cpu.status.carry);
@@ -2097,7 +2109,8 @@ mod test {
             cmp #0x01
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert!(cpu.status.carry);
@@ -2112,7 +2125,8 @@ mod test {
             cmp #0x03
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert!(!cpu.status.carry);
@@ -2128,7 +2142,8 @@ mod test {
             dec abs 0x1234
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1234, 0x3);
         cpu.run();
 
@@ -2144,7 +2159,8 @@ mod test {
             eor #0b01010101
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0xff);
@@ -2163,7 +2179,8 @@ mod test {
               brk
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
 
         // Update program start offset
         let program_start = cpu.program_counter;
@@ -2171,7 +2188,8 @@ mod test {
         program[1] = program_jmp as u8;
         program[2] = (program_jmp >> 8) as u8;
 
-        cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        cpu = CPU::new(bus);
         let pc = cpu.program_counter;
         cpu.run();
 
@@ -2184,7 +2202,8 @@ mod test {
     // Stack test --------------------------------------
     #[test]
     fn test_stack_push() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
 
         assert_eq!(cpu.stack_pointer, STACK_RESET);
         cpu.stack_push(0x69);
@@ -2195,33 +2214,13 @@ mod test {
 
     #[test]
     fn test_stack_pop() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
 
         cpu.stack_push(0x69);
         assert_eq!(cpu.stack_pointer, STACK_RESET - 1);
         assert_eq!(cpu.stack_pop(), 0x69);
         assert_eq!(cpu.stack_pointer, STACK_RESET);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_stack_overflow() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
-
-        for i in 0..STACK_RESET {
-            cpu.stack_push(i);
-        }
-
-        assert_eq!(cpu.stack_pointer, 0x00);
-
-        cpu.stack_push(0xff); // Stack overflow
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_stack_underflow() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
-        cpu.stack_pop(); // Stack underflow
     }
     // Stack test --------------------------------------
 
@@ -2235,7 +2234,8 @@ mod test {
               brk
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
 
         // Update program start offset
         let program_start = cpu.program_counter;
@@ -2243,7 +2243,8 @@ mod test {
         program[1] = program_jmp as u8;
         program[2] = (program_jmp >> 8) as u8;
 
-        cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        cpu = CPU::new(bus);
         cpu.run();
         assert_eq!(cpu.register_a, 0x00);
         assert_eq!(cpu.program_counter, program_start + 0x06);
@@ -2259,7 +2260,8 @@ mod test {
            lsr a
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x01);
@@ -2272,7 +2274,8 @@ mod test {
            lsr abs 0x1234
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x1234, 0x03);
         cpu.run();
 
@@ -2289,7 +2292,8 @@ mod test {
             pha
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.stack_pop(), 0x69);
@@ -2299,7 +2303,8 @@ mod test {
     // Status as/from byte test -----------------------------
     #[test]
     fn test_status_as_byte() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.status.negative = true;
         cpu.status.carry = true;
         cpu.status.brk = true;
@@ -2309,7 +2314,8 @@ mod test {
 
     #[test]
     fn test_status_set_from_byte() {
-        let mut cpu = CPU::new(test_rom(vec![0x00]));
+        let bus = Bus::new(test_rom(vec![0x00]), |_| {});
+        let mut cpu = CPU::new(bus);
 
         cpu.status.set_from_byte(0b10110001);
 
@@ -2332,7 +2338,8 @@ mod test {
             php
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.stack_pop(), 0b00110111)
@@ -2347,7 +2354,8 @@ mod test {
             rol a
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b10000000);
@@ -2362,7 +2370,8 @@ mod test {
             rol a
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b00000001);
@@ -2378,7 +2387,8 @@ mod test {
             ror a
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b00000001);
@@ -2393,7 +2403,8 @@ mod test {
             ror a
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0b10000000);
@@ -2410,7 +2421,8 @@ mod test {
             lda #0x01
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.stack_push_u16(cpu.program_counter + 4); // Push pc first
         cpu.run(); // Then rti
 
@@ -2429,7 +2441,8 @@ mod test {
               rts
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
 
         // Update program start offset
         let program_start = cpu.program_counter;
@@ -2437,7 +2450,8 @@ mod test {
         program[1] = program_jmp as u8;
         program[2] = (program_jmp >> 8) as u8;
 
-        cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x01);
@@ -2453,7 +2467,8 @@ mod test {
             sbc #0x04
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0x00);
@@ -2469,7 +2484,8 @@ mod test {
             sbc #0x04
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_a, 0xfb);
@@ -2488,7 +2504,8 @@ mod test {
             sta 0x11
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.mem_read(0x0011), 0x69)
@@ -2501,7 +2518,8 @@ mod test {
             sta abs 0x1122
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.mem_read(0x1122), 0x69)
@@ -2521,7 +2539,8 @@ mod test {
             sta (0x00),y
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.mem_read(0x0010), 0x69);
@@ -2537,7 +2556,8 @@ mod test {
             tsx
         );
 
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.run();
 
         assert_eq!(cpu.register_x, cpu.stack_pointer)
@@ -2553,10 +2573,10 @@ mod test {
         );
 
         let mut page_crossed = false;
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
 
         cpu.run_with_callback(|cpu| {
-            println!("PageCrossed: {}", cpu.page_crossed);
             if cpu.page_crossed {
                 page_crossed = true;
             }
@@ -2573,10 +2593,10 @@ mod test {
         );
 
         let mut page_crossed = false;
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
 
         cpu.run_with_callback(|cpu| {
-            println!("PageCrossed: {}", cpu.page_crossed);
             if cpu.page_crossed {
                 page_crossed = true;
             }
@@ -2593,13 +2613,13 @@ mod test {
         );
 
         let mut page_crossed = false;
-        let mut cpu = CPU::new(test_rom(program.to_vec()));
+        let bus = Bus::new(test_rom(program.to_vec()), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(0x00, 0xff);
         cpu.mem_write(0x01, 0x00);
         cpu.mem_write(0x0100, 0x69);
 
         cpu.run_with_callback(|cpu| {
-            println!("PageCrossed: {}", cpu.page_crossed);
             if cpu.page_crossed {
                 page_crossed = true;
             }

@@ -69,7 +69,9 @@ pub fn log(cpu: &mut CPU) -> String {
                     | Code::BVS => {
                         format!(
                             " ${:04X}",
-                            mem_addr.wrapping_add((stored_value as i8) as u16).wrapping_add(1)
+                            mem_addr
+                                .wrapping_add((stored_value as i8) as u16)
+                                .wrapping_add(1)
                         )
                     }
                     _ => format!(" #${:02X}", params[0]),
@@ -126,8 +128,7 @@ pub fn log(cpu: &mut CPU) -> String {
             _ => format!("= {:02X}", stored_value),
         },
     };
-    let asm = format!("{} {}",
-        asm, addr_values);
+    let asm = format!("{} {}", asm, addr_values);
 
     let cpu_state = format!(
         "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
@@ -207,11 +208,12 @@ pub fn monitor(cpu: &mut CPU) -> String {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::cpu::{Memory, cartridge::test::test_rom};
+    use crate::cpu::{Memory, bus::Bus, cartridge::test::test_rom};
 
     #[test]
     fn test_format_log() {
-        let mut cpu = CPU::new(test_rom(vec![]));
+        let bus = Bus::new(test_rom(vec![]), |_| {});
+        let mut cpu = CPU::new(bus);
         cpu.mem_write(100, 0xa2);
         cpu.mem_write(101, 0x01);
         cpu.mem_write(102, 0xca);
@@ -242,7 +244,8 @@ mod test {
 
     #[test]
     fn test_format_mem_access() {
-        let mut cpu = CPU::new(test_rom(vec![]));
+        let bus = Bus::new(test_rom(vec![]), |_| {});
+        let mut cpu = CPU::new(bus);
         // ORA ($33), Y
         cpu.mem_write(100, 0x11);
         cpu.mem_write(101, 0x33);

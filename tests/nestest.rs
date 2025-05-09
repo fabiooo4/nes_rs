@@ -1,8 +1,8 @@
+use nes_rs::cpu::{CPU, bus::Bus, cartridge::Rom, log::log};
 use std::{fs, str::from_utf8};
-use nes_rs::cpu::{CPU, cartridge::Rom, log::log};
 
 #[test]
-fn test_all_opcodes() {
+fn test_all_opcodes_cartridge() {
     let mut rom = Rom::new(&fs::read("./tests/nestest/nestest.nes").unwrap()).unwrap();
     let test_file = fs::read("./tests/nestest/nestest_no_cycle.log").unwrap();
 
@@ -10,20 +10,14 @@ fn test_all_opcodes() {
     let mut removed = rom.prg_rom[1675..1699].to_vec();
     removed.fill(0);
 
-    rom.prg_rom = [
-        &rom.prg_rom[..1675],
-        &removed,
-        &rom.prg_rom[1699..],
-    ]
-    .concat();
+    rom.prg_rom = [&rom.prg_rom[..1675], &removed, &rom.prg_rom[1699..]].concat();
 
-    let mut cpu = CPU::new(rom);
+    let bus = Bus::new(rom, |_| {});
+    let mut cpu = CPU::new(bus);
     cpu.reset();
     cpu.program_counter = 0xC000;
 
-    let mut expected_log: Vec<&str> = from_utf8(&test_file)
-        .unwrap()
-        .split('\n').collect();
+    let mut expected_log: Vec<&str> = from_utf8(&test_file).unwrap().split('\n').collect();
 
     // Remove unimplemented test logs
     for _ in 0..12 {

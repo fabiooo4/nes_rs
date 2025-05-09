@@ -8,16 +8,16 @@ use registers::{
 
 #[allow(clippy::upper_case_acronyms)]
 pub struct PPU {
-    chr_rom: Vec<u8>,
-    palette_table: [u8; 32],
-    vram: [u8; 2048],
-    addr: AddressRegister,
-    ctrl: ControlRegister,
-    mask: MaskRegister,
-    status: StatusRegister,
-    oam_data: [u8; 256],
+    pub chr_rom: Vec<u8>,
+    pub palette_table: [u8; 32],
+    pub vram: [u8; 2048],
+    pub addr: AddressRegister,
+    pub ctrl: ControlRegister,
+    pub mask: MaskRegister,
+    pub status: StatusRegister,
+    pub oam_data: [u8; 256],
     oam_addr: u8,
-    scroll: ScrollRegister,
+    pub scroll: ScrollRegister,
 
     mirroring: Mirroring,
 
@@ -176,10 +176,19 @@ impl PPUOperations for PPU {
                 self.internal_data_buf = self.vram[self.mirror_vram_addr(addr) as usize];
                 res
             }
-            0x3000..=0x3eff => panic!(
-                "addr space 0x3000..0x3eff is not expected to be used, requested = {} ",
-                addr
-            ),
+
+            //Addresses $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C
+            0x3f10 | 0x3f14 | 0x3f18 | 0x3f1c => {
+                let add_mirror = addr - 0x10;
+                self.palette_table[(add_mirror - 0x3f00) as usize]
+            }
+
+            0x3000..=0x3eff => {
+                unreachable!(
+                    "addr space 0x3000..0x3eff is not expected to be used, requested = {:X} ",
+                    addr
+                )
+            }
             0x3f00..=0x3fff => self.palette_table[(addr - 0x3f00) as usize],
             _ => panic!("unexpected access to mirrored space {}", addr),
         }
@@ -196,8 +205,8 @@ impl PPUOperations for PPU {
             0x2000..=0x2fff => {
                 self.vram[self.mirror_vram_addr(addr) as usize] = data;
             }
-            0x3000..=0x3eff => unimplemented!(
-                "addr space 0x3000..0x3eff is not expected to be used, requested = {} ",
+            0x3000..=0x3eff => unreachable!(
+                "addr space 0x3000..0x3eff is not expected to be used, requested = {:X} ",
                 addr
             ),
             //Addresses $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C
