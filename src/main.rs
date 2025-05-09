@@ -1,7 +1,12 @@
-use std::{fs, process::exit, thread::sleep, time::Duration};
+use std::{fs, process::exit};
 
-use nes_rs::cpu::{CPU, Memory, cartridge::Rom, log::log};
-use rand::Rng;
+use nes_rs::{
+    cpu::{CPU, Memory, cartridge::Rom},
+    render::{
+        frame::{self, WIDTH},
+        show_tile, show_tile_bank,
+    },
+};
 use sdl2::{
     EventPump,
     event::Event,
@@ -89,9 +94,13 @@ fn main() {
     let sdl_content = sdl2::init().unwrap();
     let video_subsystem = sdl_content.video().unwrap();
 
-    let scale = 20;
+    let scale = 1;
     let window = video_subsystem
-        .window("NES", 32 * scale, 32 * scale)
+        .window(
+            "NES Emulator",
+            (frame::WIDTH * 3 * scale) as u32,
+            (frame::HEIGHT * 3 * scale) as u32,
+        )
         .position_centered()
         .build()
         .unwrap();
@@ -102,42 +111,34 @@ fn main() {
 
     let creator = canvas.texture_creator();
     let mut texture = creator
-        .create_texture_target(PixelFormatEnum::RGB24, 32, 32)
+        .create_texture_target(
+            PixelFormatEnum::RGB24,
+            frame::WIDTH as u32,
+            frame::HEIGHT as u32,
+        )
         .unwrap();
     // SDL init -----------------------------------------------------------
 
-    let rom = Rom::new(&fs::read("nestest.nes").expect("Unable to open ROM")).unwrap();
-    let mut cpu = CPU::new(rom);
-    cpu.reset();
-    cpu.program_counter = 0xC000;
+    let rom = Rom::new(&fs::read("Alter_Ego.nes").expect("Unable to open ROM"))
+        .unwrap();
 
-    /* let mut rng = rand::rng();
-    let mut screen = [0; 32 * 3 * 32]; */
-    cpu.run_with_callback(move |cpu| {
-        println!("{}", log(cpu));
+    // Display tile
+    let bank_frame = show_tile_bank(&rom.chr_rom, 1);
+    texture.update(None, &bank_frame.data, 256 * 3).unwrap();
 
-        /*
-        // This game code assumes the following table:
-        //
-        // | Address space    | Type      | Description                          |
-        // |------------------|-----------|--------------------------------------|
-        // | 0xFE             | Input     | Random number generator              |
-        // | 0xFF             | Input     | Code of the last pressed button      |
-        // | [0x0200..0x0600] | Output    | Screen.                              |
-        // |                  |           | Each chell represents the color of a |
-        // |                  |           | pixel in a 32x32 matrix that starts  |
-        // |                  |           | from the top left corner.            |
-        // | [0x0600..]       | Game Code | Execution code                       |
+    canvas.copy(&texture, None, None).unwrap();
+    canvas.present();
 
-        cpu.mem_write(0xFE, rng.random_range(0..=0xF));
-        handle_user_input(cpu, &mut event_pump);
-
-        if read_screen_state(cpu, &mut screen) {
-            texture.update(None, &screen, 32 * 3).unwrap();
-            canvas.copy(&texture, None, None).unwrap();
-            canvas.present();
+    loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => std::process::exit(0),
+                _ => { /* do nothing */ }
+            }
         }
-
-        sleep(Duration::new(0, 50_000)); */
-    });
+    }
 }

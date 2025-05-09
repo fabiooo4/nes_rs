@@ -10,3 +10,7 @@ sdl2 = "0.37.0"
 
 [dev-dependencies]
 rustasm6502 = "=0.1.4"
+
+[features]
+# Enables step by step execution
+debug = []

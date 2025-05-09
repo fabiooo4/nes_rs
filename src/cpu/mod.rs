@@ -125,7 +125,7 @@ impl CPU {
     /// # Panics
     /// If an invalid opcode is encountered, the CPU will panic.
     pub fn run_with_callback<F: FnMut(&mut CPU)>(&mut self, mut callback: F) {
-        #[cfg(all(debug_assertions, not(test)))]
+        #[cfg(all(not(test), feature = "debug"))]
         {
             println!("Running in debug mode (to execute normally use 'cargo run --release'):");
             println!("Press enter to step to the next instruction, or 'q' to quit\n\n");
@@ -139,7 +139,7 @@ impl CPU {
             callback(self);
 
             // Step by step debug
-            #[cfg(all(debug_assertions, not(test)))]
+            #[cfg(all(not(test), feature = "debug"))]
             self.debug();
 
             let code = self.mem_read(self.program_counter);
@@ -1481,8 +1481,6 @@ impl Status {
 
 #[cfg(test)]
 mod test {
-    use crate::cpu::log::monitor;
-
     use super::*;
     use cartridge::test::test_rom;
 
