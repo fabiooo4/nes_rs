@@ -1,8 +1,9 @@
+use clap::Parser;
 use nes_rs::{
     cpu::{CPU, bus::Bus, cartridge::Rom},
     joypad::{
         Joypad,
-        buttons::{JoypadButtonMask, JoypadButtons},
+        buttons::JoypadButtonMask,
     },
     ppu::PPU,
     render::{
@@ -12,6 +13,14 @@ use nes_rs::{
 };
 use sdl2::{event::Event, keyboard::Keycode, pixels::PixelFormatEnum};
 use std::{collections::HashMap, fs};
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Path to the rom to execute
+    #[arg(short, long)]
+    rom: String,
+}
 
 fn main() {
     // SDL init -----------------------------------------------------------
@@ -65,8 +74,10 @@ fn main() {
         (Keycode::Period, JoypadButtonMask::ButtonB),
     ]);
     // Key mapping --------------------------------------------------------
+    //
+    let args = Args::parse();
 
-    let rom = Rom::new(&fs::read("Pac-Man.nes").expect("Unable to open ROM")).unwrap();
+    let rom = Rom::new(&fs::read(args.rom).expect("Unable to open ROM")).unwrap();
     let mut frame = Frame::new();
 
     let bus = Bus::new(
