@@ -17,7 +17,7 @@ impl Frame {
         if base + 2 < self.data.len() {
             self.data[base] = color.0;
             self.data[base + 1] = color.1;
-            self.data[base + 2] = color.1;
+            self.data[base + 2] = color.2;
         }
     }
 }

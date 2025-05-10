@@ -1,4 +1,7 @@
-use crate::ppu::{PPU, PPUOperations};
+use crate::{
+    joypad::Joypad,
+    ppu::{PPU, PPUOperations},
+};
 
 use super::{Memory, cartridge::Rom};
 
@@ -6,20 +9,26 @@ pub struct Bus<'call> {
     cpu_wram: [u8; 2048], // 11 Bits
     prg_rom: Vec<u8>,
     ppu: PPU,
+    joypad_1: Joypad,
+    joypad_2: Joypad,
 
     cycles: usize,
-    gameloop_callback: Box<dyn FnMut(&PPU) + 'call>,
+    gameloop_callback: Box<GameloopCallback<'call>>,
 }
+
+type GameloopCallback<'call> = dyn FnMut(&PPU, &mut Joypad, &mut Joypad) + 'call;
 
 impl Bus<'_> {
     pub fn new<'call, F>(rom: Rom, gameloop_callback: F) -> Bus<'call>
     where
-        F: FnMut(&PPU) + 'call,
+        F: FnMut(&PPU, &mut Joypad, &mut Joypad) + 'call,
     {
         Bus {
             cpu_wram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
+            joypad_1: Joypad::new(),
+            joypad_2: Joypad::new(),
             cycles: 0,
             gameloop_callback: Box::from(gameloop_callback),
         }
@@ -45,7 +54,7 @@ impl Bus<'_> {
         let nmi_after = self.ppu.nmi_interrupt.is_some();
 
         if !nmi_before && nmi_after {
-            (self.gameloop_callback)(&self.ppu)
+            (self.gameloop_callback)(&self.ppu, &mut self.joypad_1, &mut self.joypad_2)
         }
     }
 
@@ -97,16 +106,8 @@ impl Memory for Bus<'_> {
                 0
             }
 
-            0x4016 => {
-                // ignore joypad 1;
-                0
-            }
-
-            0x4017 => {
-                // ignore joypad 2
-                0
-            }
-
+            0x4016 => self.joypad_1.read(),
+            0x4017 => self.joypad_2.read(),
             _ => {
                 println!("Memory access at {:X} ignored", addr);
                 0
@@ -162,13 +163,8 @@ impl Memory for Bus<'_> {
                 // self.tick(add_cycles); //todo this will cause weird effects as PPU will have 513/514 * 3 ticks
             }
 
-            0x4016 => {
-                // ignore joypad 1;
-            }
-
-            0x4017 => {
-                // ignore joypad 2
-            }
+            0x4016 => self.joypad_1.write(data),
+            0x4017 => self.joypad_2.write(data),
 
             _ => {
                 println!("Memory write at {:X} ignored", addr);

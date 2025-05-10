@@ -1,14 +1,17 @@
-use std::fs;
 use nes_rs::{
-    cpu::{bus::Bus, cartridge::Rom, CPU}, ppu::PPU, render::{
-        frame::{self, Frame}, render
-    }
+    cpu::{CPU, bus::Bus, cartridge::Rom},
+    joypad::{
+        Joypad,
+        buttons::{JoypadButtonMask, JoypadButtons},
+    },
+    ppu::PPU,
+    render::{
+        frame::{self, Frame},
+        render,
+    },
 };
-use sdl2::{
-    event::Event,
-    keyboard::Keycode,
-    pixels::PixelFormatEnum,
-};
+use sdl2::{event::Event, keyboard::Keycode, pixels::PixelFormatEnum};
+use std::{collections::HashMap, fs};
 
 fn main() {
     // SDL init -----------------------------------------------------------
@@ -40,29 +43,71 @@ fn main() {
         .unwrap();
     // SDL init -----------------------------------------------------------
 
-    let rom = Rom::new(&fs::read("Pac-Man.nes").expect("Unable to open ROM"))
-        .unwrap();
+    // Key mapping --------------------------------------------------------
+    let joy1_keymap: HashMap<Keycode, JoypadButtonMask> = HashMap::from([
+        (Keycode::S, JoypadButtonMask::Down),
+        (Keycode::W, JoypadButtonMask::Up),
+        (Keycode::D, JoypadButtonMask::Right),
+        (Keycode::A, JoypadButtonMask::Left),
+        (Keycode::E, JoypadButtonMask::Select),
+        (Keycode::R, JoypadButtonMask::Start),
+        (Keycode::Space, JoypadButtonMask::ButtonA),
+        (Keycode::LShift, JoypadButtonMask::ButtonB),
+    ]);
+    let joy2_keymap: HashMap<Keycode, JoypadButtonMask> = HashMap::from([
+        (Keycode::Down, JoypadButtonMask::Down),
+        (Keycode::Up, JoypadButtonMask::Up),
+        (Keycode::Right, JoypadButtonMask::Right),
+        (Keycode::Left, JoypadButtonMask::Left),
+        (Keycode::RCtrl, JoypadButtonMask::Select),
+        (Keycode::RShift, JoypadButtonMask::Start),
+        (Keycode::Comma, JoypadButtonMask::ButtonA),
+        (Keycode::Period, JoypadButtonMask::ButtonB),
+    ]);
+    // Key mapping --------------------------------------------------------
 
+    let rom = Rom::new(&fs::read("Pac-Man.nes").expect("Unable to open ROM")).unwrap();
     let mut frame = Frame::new();
 
-    let bus = Bus::new(rom, move |ppu: &PPU| {
-        render(ppu, &mut frame);
-        texture.update(None, &frame.data, 256 * 3).unwrap();
+    let bus = Bus::new(
+        rom,
+        move |ppu: &PPU, joypad1: &mut Joypad, joypad2: &mut Joypad| {
+            render(ppu, &mut frame);
+            texture.update(None, &frame.data, 256 * 3).unwrap();
 
-        canvas.copy(&texture, None, None).unwrap();
+            canvas.copy(&texture, None, None).unwrap();
 
-        canvas.present();
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => std::process::exit(0),
-                _ => { /* do nothing */ }
+            canvas.present();
+            for event in event_pump.poll_iter() {
+                match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    } => std::process::exit(0),
+
+                    Event::KeyDown { keycode, .. } => {
+                        if let Some(key) = joy1_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                            joypad1.set_button_pressed_status(*key, true);
+                        }
+                        if let Some(key) = joy2_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                            joypad2.set_button_pressed_status(*key, true);
+                        }
+                    }
+                    Event::KeyUp { keycode, .. } => {
+                        if let Some(key) = joy1_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                            joypad1.set_button_pressed_status(*key, false);
+                        }
+                        if let Some(key) = joy2_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                            joypad2.set_button_pressed_status(*key, false);
+                        }
+                    }
+
+                    _ => { /* do nothing */ }
+                }
             }
-        }
-    });
+        },
+    );
 
     let mut cpu = CPU::new(bus);
 

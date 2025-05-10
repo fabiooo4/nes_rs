@@ -6,6 +6,7 @@ extern crate rustasm6502;
 pub mod cpu;
 pub mod ppu;
 pub mod render;
+pub mod joypad;
 
 pub trait BitFlags {
     fn as_byte(&self) -> u8;

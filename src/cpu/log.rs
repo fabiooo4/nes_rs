@@ -212,7 +212,7 @@ mod test {
 
     #[test]
     fn test_format_log() {
-        let bus = Bus::new(test_rom(vec![]), |_| {});
+        let bus = Bus::new(test_rom(vec![]), |_,_,_| {});
         let mut cpu = CPU::new(bus);
         cpu.mem_write(100, 0xa2);
         cpu.mem_write(101, 0x01);
@@ -244,7 +244,7 @@ mod test {
 
     #[test]
     fn test_format_mem_access() {
-        let bus = Bus::new(test_rom(vec![]), |_| {});
+        let bus = Bus::new(test_rom(vec![]), |_,_,_| {});
         let mut cpu = CPU::new(bus);
         // ORA ($33), Y
         cpu.mem_write(100, 0x11);

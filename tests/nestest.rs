@@ -12,7 +12,7 @@ fn test_all_opcodes_cartridge() {
 
     rom.prg_rom = [&rom.prg_rom[..1675], &removed, &rom.prg_rom[1699..]].concat();
 
-    let bus = Bus::new(rom, |_| {});
+    let bus = Bus::new(rom, |_,_,_| {});
     let mut cpu = CPU::new(bus);
     cpu.reset();
     cpu.program_counter = 0xC000;
