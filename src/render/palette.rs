@@ -18,9 +18,9 @@ pub static SYSTEM_PALLETE: [(u8,u8,u8); 64] = [
 ];
 
 /// Get the background palette based on the tile position
-pub fn bg_palette(ppu: &PPU, tile_column: usize, tile_row: usize) -> [u8; 4] {
+pub fn bg_palette(ppu: &PPU, attr_table: &[u8], tile_column: usize, tile_row: usize) -> [u8; 4] {
     let attr_table_idx = tile_row / 4 * 8 + tile_column / 4;
-    let attr_byte = ppu.vram[0x3c0 + attr_table_idx];
+    let attr_byte = attr_table[attr_table_idx];
 
     let palette_idx = match (tile_column % 4 / 2, tile_row % 4 / 2) {
         (0, 0) => attr_byte & 0b11,

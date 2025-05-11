@@ -42,6 +42,16 @@ impl ControlRegister {
         }
     }
 
+    /// Get the base nametable address
+    pub fn nametable_addr(&self) -> u16 {
+        match (self.nametable1, self.nametable2) {
+            (false, false) => 0x2000,
+            (false, true) => 0x2400,
+            (true, false) => 0x2800,
+            (true, true) => 0x2C00,
+        }
+    }
+
     /// Get the vram address increment
     pub fn vram_addr_increment(&self) -> u8 {
         match self.vram_addr_increment {

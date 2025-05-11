@@ -19,7 +19,7 @@ pub struct PPU {
     oam_addr: u8,
     pub scroll: ScrollRegister,
 
-    mirroring: Mirroring,
+    pub mirroring: Mirroring,
 
     internal_data_buf: u8,
 
