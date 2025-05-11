@@ -44,7 +44,7 @@ impl ControlRegister {
 
     /// Get the base nametable address
     pub fn nametable_addr(&self) -> u16 {
-        match (self.nametable1, self.nametable2) {
+        match (self.nametable2, self.nametable1) {
             (false, false) => 0x2000,
             (false, true) => 0x2400,
             (true, false) => 0x2800,

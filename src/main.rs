@@ -1,10 +1,8 @@
-use clap::Parser;
+use clap::error::ErrorFormatter;
 use nes_rs::{
-    cpu::{CPU, bus::Bus, cartridge::Rom},
-    joypad::{
-        Joypad,
-        buttons::JoypadButtonMask,
-    },
+    ARGS,
+    cpu::{CPU, bus::Bus, cartridge::Rom, log::log},
+    joypad::{Joypad, buttons::JoypadButtonMask},
     ppu::PPU,
     render::{
         frame::{self, Frame},
@@ -13,14 +11,6 @@ use nes_rs::{
 };
 use sdl2::{event::Event, keyboard::Keycode, pixels::PixelFormatEnum};
 use std::{collections::HashMap, fs};
-
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    /// Path to the rom to execute
-    #[arg(short, long)]
-    rom: String,
-}
 
 fn main() {
     // SDL init -----------------------------------------------------------
@@ -74,10 +64,8 @@ fn main() {
         (Keycode::Period, JoypadButtonMask::ButtonB),
     ]);
     // Key mapping --------------------------------------------------------
-    //
-    let args = Args::parse();
 
-    let rom = Rom::new(&fs::read(args.rom).expect("Unable to open ROM")).unwrap();
+    let rom = Rom::new(&fs::read(ARGS.rom.clone()).expect("Unable to open ROM")).unwrap();
     let mut frame = Frame::new();
 
     let bus = Bus::new(
@@ -121,7 +109,13 @@ fn main() {
     );
 
     let mut cpu = CPU::new(bus);
+    cpu.reset_pc();
 
-    // cpu.reset();
-    cpu.run();
+    if ARGS.debug {
+        cpu.run_with_callback(move |cpu| cpu.debug());
+    } else if ARGS.log {
+        cpu.run_with_callback(move |cpu| println!("{}", log(cpu)))
+    } else {
+        cpu.run()
+    }
 }

@@ -14,7 +14,7 @@ fn test_all_opcodes_cartridge() {
 
     let bus = Bus::new(rom, |_,_,_| {});
     let mut cpu = CPU::new(bus);
-    cpu.reset();
+    cpu.reset_pc();
     cpu.program_counter = 0xC000;
 
     let mut expected_log: Vec<&str> = from_utf8(&test_file).unwrap().split('\n').collect();

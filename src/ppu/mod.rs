@@ -24,7 +24,7 @@ pub struct PPU {
     internal_data_buf: u8,
 
     cycles: usize,
-    scanlines: usize,
+    scanline: usize,
 
     pub nmi_interrupt: Option<u8>,
 }
@@ -45,7 +45,7 @@ impl PPU {
             mirroring,
             internal_data_buf: 0,
             cycles: 0,
-            scanlines: 0,
+            scanline: 0,
             nmi_interrupt: None,
         }
     }
@@ -86,12 +86,16 @@ impl PPU {
 
         // Horizontal
         if self.cycles >= 341 {
+            if self.is_sprite_0_hit(self.cycles) {
+                self.status.sprite_0_hit = true;
+            }
+
             // Wrap
             self.cycles -= 341;
-            self.scanlines += 1;
+            self.scanline += 1;
 
             // Vertical
-            if self.scanlines == 241 {
+            if self.scanline == 241 {
                 self.status.vblank = true;
                 self.status.sprite_0_hit = false;
                 if self.ctrl.generate_nmi {
@@ -99,8 +103,8 @@ impl PPU {
                 }
             }
 
-            if self.scanlines >= 262 {
-                self.scanlines = 0;
+            if self.scanline >= 262 {
+                self.scanline = 0;
                 self.nmi_interrupt = None;
 
                 self.status.vblank = false;
@@ -111,6 +115,12 @@ impl PPU {
         }
 
         false
+    }
+
+    fn is_sprite_0_hit(&self, cycle: usize) -> bool {
+        let y = self.oam_data[0] as usize;
+        let x = self.oam_data[3] as usize;
+        (y == self.scanline) && x <= cycle && self.mask.sprite_rendering
     }
 }
 
@@ -200,13 +210,13 @@ impl PPUOperations for PPU {
 
         match addr {
             0..=0x1fff => {
-                println!("attempt to write to chr rom space {}", addr);
+                println!("Attempt to write to chr rom space {:04X}", addr);
             }
             0x2000..=0x2fff => {
                 self.vram[self.mirror_vram_addr(addr) as usize] = data;
             }
             0x3000..=0x3eff => unreachable!(
-                "addr space 0x3000..0x3eff is not expected to be used, requested = {:X} ",
+                "Address space 0x3000..0x3eff is not expected to be used, requested = {:04X} ",
                 addr
             ),
             //Addresses $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C
@@ -215,7 +225,7 @@ impl PPUOperations for PPU {
                 self.palette_table[(add_mirror - 0x3f00) as usize] = data;
             }
             0x3f00..=0x3fff => self.palette_table[(addr - 0x3f00) as usize] = data,
-            _ => panic!("unexpected access to mirrored space {}", addr),
+            _ => panic!("Unexpected access to mirrored space {:04X}", addr),
         }
     }
 

@@ -24,35 +24,22 @@ impl Rect {
 
 pub fn render(ppu: &PPU, frame: &mut Frame) {
     let scroll_x = ppu.scroll.scroll_x as usize;
-    let scroll_y = ppu.scroll.scroll_x as usize;
+    let scroll_y = ppu.scroll.scroll_y as usize;
 
-    let (main_nametable, secondary_nametable) = match (&ppu.mirroring, ppu.ctrl.nametable_addr()) {
-        (Mirroring::Vertical, 0x2000) | (Mirroring::Vertical, 0x2800) => {
-            // [A][B]
-            // [a][b]
-            (&ppu.vram[0..0x400], &ppu.vram[0x400..0x800])
-        }
-        (Mirroring::Vertical, 0x2400) | (Mirroring::Vertical, 0x2C00) => {
-            // [B][A]
-            // [b][a]
-            (&ppu.vram[0x400..0x800], &ppu.vram[0..0x400])
-        }
-
-        (Mirroring::Horizontal, 0x2000) | (Mirroring::Horizontal, 0x2400) => {
-            // [A][a]
-            // [B][b]
-            (&ppu.vram[0..0x400], &ppu.vram[0x400..0x800])
-        }
-        (Mirroring::Horizontal, 0x2800) | (Mirroring::Horizontal, 0x2C00) => {
-            // [B][b]
-            // [A][a]
-            (&ppu.vram[0x400..0x800], &ppu.vram[0..0x400])
-        }
+    let (main_nametable, second_nametable) = match (&ppu.mirroring, ppu.ctrl.nametable_addr()) {
+        (Mirroring::Vertical, 0x2000)
+        | (Mirroring::Vertical, 0x2800)
+        | (Mirroring::Horizontal, 0x2000)
+        | (Mirroring::Horizontal, 0x2400) => (&ppu.vram[0..0x400], &ppu.vram[0x400..0x800]),
+        (Mirroring::Vertical, 0x2400)
+        | (Mirroring::Vertical, 0x2C00)
+        | (Mirroring::Horizontal, 0x2800)
+        | (Mirroring::Horizontal, 0x2C00) => (&ppu.vram[0x400..0x800], &ppu.vram[0..0x400]),
         _ => panic!("Mirroring mode {:?} not supported", ppu.mirroring),
     };
 
     // [A]
-    draw_nametable(
+    render_nametable(
         ppu,
         frame,
         main_nametable,
@@ -62,14 +49,25 @@ pub fn render(ppu: &PPU, frame: &mut Frame) {
     );
 
     // [B]
-    draw_nametable(
-        ppu,
-        frame,
-        secondary_nametable,
-        Rect::new(0, 0, scroll_x, scroll_y),
-        (256 - scroll_x) as isize,
-        0,
-    );
+    if scroll_x > 0 {
+        render_nametable(
+            ppu,
+            frame,
+            second_nametable,
+            Rect::new(0, 0, scroll_x, 240),
+            (256 - scroll_x) as isize,
+            0,
+        );
+    } else if scroll_y > 0 {
+        render_nametable(
+            ppu,
+            frame,
+            second_nametable,
+            Rect::new(0, 0, 256, scroll_y),
+            0,
+            (240 - scroll_y) as isize,
+        );
+    }
 
     // Draw sprites
     for i in (0..ppu.oam_data.len()).step_by(4).rev() {
@@ -116,7 +114,7 @@ pub fn render(ppu: &PPU, frame: &mut Frame) {
     }
 }
 
-fn draw_nametable(
+fn render_nametable(
     ppu: &PPU,
     frame: &mut Frame,
     name_table: &[u8],
@@ -128,7 +126,7 @@ fn draw_nametable(
     let attribute_table = &name_table[0x03c0..0x400];
 
     // Draw background
-    for i in 0..0x03c0 {
+    (0..0x03c0).for_each(|i| {
         let tile_idx = name_table[i] as u16;
         let tile_column = i % 32;
         let tile_row = i / 32;
@@ -172,7 +170,7 @@ fn draw_nametable(
                 }
             }
         }
-    }
+    });
 }
 
 pub fn show_tile(chr_rom: &[u8], bank: usize, tile_n: usize) -> Frame {

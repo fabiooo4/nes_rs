@@ -189,7 +189,7 @@ pub fn monitor(cpu: &mut CPU) -> String {
     );
 
     let mut memory_banks = String::default();
-    for col in (0x0000_u16..=0x0100_u16).step_by(0x10) {
+    for col in (0x00_u16..=0xff_u16).step_by(0x10) {
         memory_banks.push_str(&format!("{:04X}: ", col));
         for row in 0x0_u8..=0xf_u8 {
             memory_banks.push_str(&format!("{:02X} ", cpu.mem_read(col + row as u16)));
