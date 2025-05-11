@@ -86,19 +86,19 @@ fn main() {
                     } => std::process::exit(0),
 
                     Event::KeyDown { keycode, .. } => {
-                        if let Some(key) = joy1_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
-                            joypad1.set_button_pressed_status(*key, true);
-                        }
                         if let Some(key) = joy2_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
                             joypad2.set_button_pressed_status(*key, true);
                         }
+                        if let Some(key) = joy1_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                            joypad1.set_button_pressed_status(*key, true);
+                        }
                     }
                     Event::KeyUp { keycode, .. } => {
-                        if let Some(key) = joy1_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
-                            joypad1.set_button_pressed_status(*key, false);
-                        }
                         if let Some(key) = joy2_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
                             joypad2.set_button_pressed_status(*key, false);
+                        }
+                        if let Some(key) = joy1_keymap.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                            joypad1.set_button_pressed_status(*key, false);
                         }
                     }
 
@@ -109,7 +109,6 @@ fn main() {
     );
 
     let mut cpu = CPU::new(bus);
-    cpu.reset_pc();
 
     if ARGS.debug {
         cpu.run_with_callback(move |cpu| cpu.debug());

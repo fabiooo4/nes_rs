@@ -97,6 +97,7 @@ impl<'a> CPU<'a> {
     /// # Panics
     /// If an invalid opcode is encountered, the CPU will panic.
     pub fn run_with_callback<F: FnMut(&mut CPU)>(&mut self, mut callback: F) {
+        self.reset_pc();
         loop {
             if self.bus.poll_nmi_status().is_some() {
                 self.interrupt_nmi();

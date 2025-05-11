@@ -25,7 +25,7 @@ impl Rom {
 
         // Check iNES version
         if raw[7] & 0b0000_1100 != 0 {
-            return Err("NES2.0 format is not supported");
+            // return Err("NES2.0 format is not supported");
         }
 
         // Type of mapper
